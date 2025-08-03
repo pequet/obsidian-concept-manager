@@ -1,0 +1,14 @@
+Script Execution
+========================================================================
+- Asking AI: What is the capital of Belgium?
+No model specified, using default model for perplexity: sonar-pro
+[PerplexityProvider] Token usage set: 23 prompt + 16 completion = 39 total
+[Telemetry] Updating command state with: {
+  promptTokens: 23,
+  completionTokens: 16,
+  provider: 'perplexity',
+  model: 'sonar-pro'
+}
+The capital of Belgium is **Brussels**[1][2][3].
+========================================================================
+🏁 Script logic finished.
