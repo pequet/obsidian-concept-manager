@@ -84,136 +84,233 @@ class ConceptManager {
      * @param {Object} params - The parameters object
      * @param {Object} params.dv - The dataview API object
      * @param {string} params.currentPath - The full path of the current file
-     * @returns {Array} Array of pages in the same directory
+     * @returns {Object} Object with exactFolder and subFolders arrays
      * @example
      * // If current file is in "Technical Analysis/Time-Based Analysis/concept.md"
-     * // Returns all files in "Technical Analysis/Time-Based Analysis/" except the current file
-     * const samePathFiles = getFilesInSamePath({ dv, currentPath: "path/to/file.md" });
+     * // Returns { exactFolder: [...], subFolders: [...] }
+     * const pathFiles = getFilesInSamePath({ dv, currentPath: "path/to/file.md" });
      */
     getFilesInSamePath({ dv, currentPath }) {
         const pathParts = currentPath.split('/');
         // Remove the filename to get just the directory path
         const dirPath = pathParts.slice(0, -1).join('/');
+        const currentDepth = pathParts.length - 1; // Subtract 1 for filename
                 
-        return dv.pages()
+        const allSamePathFiles = dv.pages()
             .where(p => p.file.path.startsWith(dirPath) && p.file.path !== currentPath);
+            
+        // Separate files in exact same folder vs subfolders
+        const exactFolder = [];
+        const subFolders = [];
+        
+        allSamePathFiles.forEach(file => {
+            const fileDepth = file.file.path.split('/').length - 1; // Subtract 1 for filename
+            if (fileDepth === currentDepth) {
+                exactFolder.push(file);
+            } else {
+                subFolders.push(file);
+            }
+        });
+        
+        return { exactFolder, subFolders };
     }
 
     /**
      * Main method for finding related concepts and calculating their relationship strength
-     * Currently:
-     * 1. Looks for matches in each relation type (path i.e. category, level, unit)
-     * 2. Calculates a confidence score based on number of matching values
-     * 3. Returns sorted list of related concepts with confidence scores
+     * Uses a flexible matching system where you can specify any frontmatter fields to match on.
+     * 
+     * Scoring system:
+     * 1. Frontmatter field matching: 2 points each for matching any specified frontmatter fields
+     * 2. Path proximity (automatic): 2 points for files in exact same folder, 1 point for files in subfolders  
      * 
      * @param {Object} params - Parameters object
      * @param {Object} params.dv - DataView API object
-     * @param {Array} params.relationTypes - Frontmatter fields to check for matches (default: ["levels", "units"])
-     * @param {string} params.subject - Subject filter (defaults to current page's subject)
-     * @param {boolean} params.strictPath - Only return same-path files if true
-     * @param {boolean} params.debug - Show detailed debug output
-     * @param {boolean} params.includeType - Whether to include 'type' as a scoring dimension (default: false)
-     * @param {string} params.typeMode - How to handle type scoring: 'current' (match current page type) or 'ignore' (default: 'current')
-     * @param {Array} params.allowedDomains - Domains to search in (defaults to current page's domain, or ['concepts', 'patterns'] if not specified)
+     * @param {Object} params.matchCriteria - Object specifying which frontmatter fields to match on
+     *   - Key: frontmatter field name (e.g., 'type', 'subject', 'level', 'domain')  
+     *   - Value: true (use current page's value), string (explicit value), or null/false (ignore)
+     * @param {boolean} params.strictPath - Only return same-path files if true (default: false)
+     * @param {boolean} params.debug - Show detailed debug output (default: false)
+     * @returns {Array} Array of related concepts with scores, sorted by total score
+     * 
+     * @example
+     * // Find other hub pages with same type and subject  
+     * getRelatedConcepts({ 
+     *   dv, 
+     *   matchCriteria: {
+     *     type: true,        // Use current page's type value
+     *     subject: true      // Use current page's subject value
+     *   },
+     *   debug: true 
+     * })
+     * 
+     * @example  
+     * // Find concepts with specific values
+     * getRelatedConcepts({ 
+     *   dv, 
+     *   matchCriteria: {
+     *     subject: "PKM LENS",  // Explicit value
+     *     type: "hub",          // Explicit value
+     *     level: true,          // Use current page's level
+     *     domain: null          // Don't match on domain
+     *   },
+     *   debug: true 
+     * })
+     * 
+     * @example
+     * // Traditional relation-based matching (backwards compatible)
+     * getRelatedConcepts({ 
+     *   dv, 
+     *   matchCriteria: {
+     *     levels: true,    // Use current page's levels
+     *     units: true      // Use current page's units
+     *   },
+     *   debug: true 
+     * })
      */
-    getRelatedConcepts({ dv, relationTypes = ["levels", "units"], subject, strictPath = false, debug = false, includeType = false, typeMode = 'current', allowedDomains = null }) {
+    getRelatedConcepts({ dv, matchCriteria = {}, strictPath = false, debug = false }) {
         const current = dv.current();
         
-        // Set up domain filtering
-        const searchDomains = allowedDomains || [current.domain] || ['concepts', 'patterns'];
+        // Process matchCriteria to get actual values to match on
+        const resolvedCriteria = {};
+        const searchFilters = {};
         
-        // Set up type filtering if enabled
-        const targetType = typeMode === 'current' ? current.type : null;
+        Object.keys(matchCriteria).forEach(field => {
+            const criteriaValue = matchCriteria[field];
+            
+            if (criteriaValue === null || criteriaValue === false) {
+                // Ignore this field
+                return;
+            } else if (criteriaValue === true) {
+                // Use current page's value
+                resolvedCriteria[field] = current[field];
+            } else {
+                // Use explicit value
+                resolvedCriteria[field] = criteriaValue;
+            }
+            
+            // Set up search filters (for domain limiting if specified)
+            if (field === 'subject' || field === 'domain') {
+                searchFilters[field] = resolvedCriteria[field];
+            }
+        });
         
         if (debug) {
             dv.header(3, "🐛 DEBUG: ConceptManager.getRelatedConcepts()");
             dv.paragraph(`**Current file:** ${current.file.path}`);
-            dv.paragraph(`**Current subject:** ${current.subject}`);
-            dv.paragraph(`**Current domain:** ${current.domain}`);
-            dv.paragraph(`**Current type:** ${current.type}`);
-            dv.paragraph(`**Relation types to check:** ${relationTypes.join(', ')}`);
-            dv.paragraph(`**Subject filter:** ${subject || 'none (using current subject)'}`);
+            dv.paragraph(`**Current frontmatter values:**`);
+            Object.keys(current).forEach(key => {
+                if (typeof current[key] !== 'function' && key !== 'file') {
+                    dv.paragraph(`  • ${key}: ${Array.isArray(current[key]) ? current[key].join(', ') : current[key]}`);
+                }
+            });
+            dv.paragraph(`**Match criteria requested:**`);
+            Object.keys(matchCriteria).forEach(field => {
+                dv.paragraph(`  • ${field}: ${matchCriteria[field]} → ${resolvedCriteria[field] || 'ignored'}`);
+            });
             dv.paragraph(`**Strict path mode:** ${strictPath}`);
-            dv.paragraph(`**Include type scoring:** ${includeType} (mode: ${typeMode})`);
-            dv.paragraph(`**Search domains:** ${searchDomains.join(', ')}`);
             dv.paragraph("---");
         }
         
-        // VALID FILTERS: relationTypes is already filtered by the caller (generateConceptsAnalysis)
-        // so we don't need to filter it again here
+        // Get files in same directory structure (unless strictPath is disabled)
+        const relatedConcepts = new Map();
         
-        // Get files in same directory structure
-        const samePathFiles = this.getFilesInSamePath({ dv, currentPath: current.file.path });
+        if (!strictPath) {
+            const pathFiles = this.getFilesInSamePath({ dv, currentPath: current.file.path });
         
         if (debug) {
             dv.paragraph(`**Step 1: Finding files in same directory path**`);
             dv.paragraph(`Directory path: ${current.file.path.split('/').slice(0, -1).join('/')}`);
-            dv.paragraph(`Files found in same path: ${samePathFiles.length}`);
-            if (samePathFiles.length > 0) {
-                dv.list(samePathFiles.map(f => f.file.path));
+                dv.paragraph(`Files found - Exact folder: ${pathFiles.exactFolder.length}, Subfolders: ${pathFiles.subFolders.length}`);
+                if (pathFiles.exactFolder.length > 0) {
+                    dv.paragraph("**Exact folder files:**");
+                    dv.list(pathFiles.exactFolder.map(f => f.file.path));
+                }
+                if (pathFiles.subFolders.length > 0) {
+                    dv.paragraph("**Subfolder files:**");
+                    dv.list(pathFiles.subFolders.map(f => f.file.path));
             }
             dv.paragraph("---");
         }
         
-        console.log("Files in same path:", samePathFiles.map(f => f.file.path));
-    
-        const currentSubject = current.subject;
-        const relatedConcepts = new Map();
-        
-        // First, add path-based scores - increased from 1 to 2 for stronger path weight
-        samePathFiles.forEach(concept => {
+            // Add path-based scores
+            // 2 points for files in exact same folder
+            pathFiles.exactFolder.forEach(concept => {
             const conceptId = concept.file.path;
             relatedConcepts.set(conceptId, { 
                 concept, 
-                scores: new Map([["path", 2]]) // Increased to 2 points for same path
+                    scores: new Map([["path", 2]]) // 2 points for exact same folder
+                });
             });
-        });
-        
-        if (debug) {
-            dv.paragraph(`**Step 2: Adding path-based scores (2 points each)**`);
-            dv.paragraph(`Added ${samePathFiles.length} concepts with path score of 2`);
-            dv.paragraph("---");
+            
+            // 1 point for files in subfolders
+            pathFiles.subFolders.forEach(concept => {
+                const conceptId = concept.file.path;
+                relatedConcepts.set(conceptId, { 
+                    concept, 
+                    scores: new Map([["path", 1]]) // 1 point for subfolders
+                });
+            });
+            
+            if (debug) {
+                dv.paragraph(`**Step 2: Adding path-based scores**`);
+                dv.paragraph(`Added ${pathFiles.exactFolder.length} concepts with path score of 2 (exact same folder)`);
+                dv.paragraph(`Added ${pathFiles.subFolders.length} concepts with path score of 1 (subfolders)`);
+                dv.paragraph("---");
+            }
         }
     
-        // Then check each relation type for matches
-        relationTypes.forEach(relationType => {
-            const values = current[relationType];
-            if (!values) {
+        // Process each frontmatter field criteria
+        let stepCounter = strictPath ? 1 : 3; // Step numbering starts at 3 if we already did path scoring
+        
+        Object.keys(resolvedCriteria).forEach(field => {
+            const targetValue = resolvedCriteria[field];
+            
+            if (!targetValue) {
                 if (debug) {
-                    dv.paragraph(`**Step 3.${relationTypes.indexOf(relationType) + 1}: Checking relation type '${relationType}'**`);
-                    dv.paragraph(`❌ Current file has no '${relationType}' values - skipping`);
+                    dv.paragraph(`**Step ${stepCounter}: Checking frontmatter field '${field}'**`);
+                    dv.paragraph(`❌ Target value is null/undefined for '${field}' - skipping`);
+                    stepCounter++;
                 }
                 return;
             }
     
-            const currentValues = Array.isArray(values) ? values : [values];
-            const selfScore = currentValues.length;
+            const targetValues = Array.isArray(targetValue) ? targetValue : [targetValue];
             
             if (debug) {
-                dv.paragraph(`**Step 3.${relationTypes.indexOf(relationType) + 1}: Checking relation type '${relationType}'**`);
-                dv.paragraph(`Current file's ${relationType} values: ${currentValues.join(', ')}`);
-                dv.paragraph(`Looking for files with domains [${searchDomains.join(', ')}] that share these values...`);
+                dv.paragraph(`**Step ${stepCounter}: Checking frontmatter field '${field}'**`);
+                dv.paragraph(`Target value(s) for '${field}': ${targetValues.join(', ')}`);
+                dv.paragraph(`Looking for files that match these values...`);
             }
-    
-            const concepts = this.getConceptsByRelationType({
-                dv,
-                relationType,
-                relationValue: values,
-                relationSubject: currentSubject,
-                allowedDomains: searchDomains
+            
+            // Find all files that match this criteria
+            const matchingConcepts = dv.pages()
+                .where(p => {
+                    // Apply subject filter if it's in searchFilters
+                    if (searchFilters.subject && p.subject !== searchFilters.subject) return false;
+                    // Apply domain filter if it's in searchFilters  
+                    if (searchFilters.domain && p.domain !== searchFilters.domain) return false;
+                    
+                    // Check if this field matches
+                    const pageValue = p[field];
+                    if (!pageValue) return false;
+                    
+                    const pageValues = Array.isArray(pageValue) ? pageValue : [pageValue];
+                    // Check if any of the target values match any of the page values
+                    return targetValues.some(tv => pageValues.includes(tv));
             });
             
             if (debug) {
-                dv.paragraph(`Found ${concepts.length} matching concepts for '${relationType}':`);
-                if (concepts.length > 0) {
-                    concepts.forEach(c => {
-                        const conceptValues = Array.isArray(c[relationType]) ? c[relationType] : [c[relationType]];
-                        dv.paragraph(`  - ${c.file.name}: ${relationType} = ${conceptValues.join(', ')}`);
+                dv.paragraph(`Found ${matchingConcepts.length} files matching '${field}' criteria:`);
+                if (matchingConcepts.length > 0) {
+                    matchingConcepts.forEach(c => {
+                        const pageValues = Array.isArray(c[field]) ? c[field] : [c[field]];
+                        dv.paragraph(`  • ${c.file.name}: ${field} = ${pageValues.join(', ')}`);
                     });
                 }
             }
     
-            concepts.forEach(concept => {
+            // Add scores for each matching concept
+            matchingConcepts.forEach(concept => {
                 const conceptId = concept.file.path;
                 if (!relatedConcepts.has(conceptId)) {
                     relatedConcepts.set(conceptId, { 
@@ -222,91 +319,57 @@ class ConceptManager {
                     });
                 }
                 
-                const conceptValues = Array.isArray(concept[relationType]) ? 
-                    concept[relationType] : [concept[relationType]];
-                const matchingValues = currentValues.filter(v => conceptValues.includes(v));
-                relatedConcepts.get(conceptId).scores.set(relationType, matchingValues.length);
+                const conceptValues = Array.isArray(concept[field]) ? 
+                    concept[field] : [concept[field]];
+                const matchingValues = targetValues.filter(v => conceptValues.includes(v));
+                relatedConcepts.get(conceptId).scores.set(field, matchingValues.length * 2); // 2 points per match
                 
                 if (debug) {
-                    dv.paragraph(`  → ${concept.file.name}: ${matchingValues.length} matching values (${matchingValues.join(', ')})`);
+                    dv.paragraph(`  → ${concept.file.name}: ${matchingValues.length} matching values (${matchingValues.join(', ')}) = ${matchingValues.length * 2} points`);
                 }
             });
             
             if (debug) {
                 dv.paragraph("---");
             }
+            stepCounter++;
         });
         
-        // Add type-based scoring if enabled
-        if (includeType && targetType) {
-            if (debug) {
-                dv.paragraph(`**Step 3.${relationTypes.length + 1}: Adding type-based scoring**`);
-                dv.paragraph(`Looking for files with type '${targetType}'...`);
-            }
-            
-            // Find all files with matching type in allowed domains
-            const typeMatches = dv.pages()
-                .where(p => {
-                    if (searchDomains && !searchDomains.includes(p.domain)) return false;
-                    if (p.subject !== (subject || currentSubject)) return false;
-                    return p.type === targetType;
-                });
-            
-            if (debug) {
-                dv.paragraph(`Found ${typeMatches.length} files with matching type '${targetType}'`);
-            }
-            
-            typeMatches.forEach(concept => {
-                const conceptId = concept.file.path;
-                if (!relatedConcepts.has(conceptId)) {
-                    relatedConcepts.set(conceptId, { 
-                        concept, 
-                        scores: new Map([["path", 0]]) 
-                    });
-                }
-                
-                relatedConcepts.get(conceptId).scores.set("type", 1);
-                
-                if (debug) {
-                    dv.paragraph(`  → ${concept.file.name}: +1 point for matching type`);
-                }
-            });
-            
-            if (debug) {
-                dv.paragraph("---");
-            }
-        }
-    
-        // Calculate final scores and confidence
+        // Calculate final scores
         if (debug) {
-            dv.paragraph(`**Step 4: Calculating confidence scores**`);
+            dv.paragraph(`**Step ${stepCounter}: Calculating final scores**`);
             dv.paragraph(`Total concepts found: ${relatedConcepts.size}`);
         }
         
         const results = Array.from(relatedConcepts.values()).map(({ concept, scores }) => {
             const pathScore = scores.get("path") || 0;
-            const conceptTypeScore = scores.get("type") || 0;
-            const relationScores = Array.from(scores.values())
-                .reduce((sum, score) => sum + score, 0) - pathScore - conceptTypeScore;
             
-            const totalScore = pathScore + conceptTypeScore + relationScores;
+            // Sum all frontmatter field scores (excluding path)
+            const frontmatterScores = Array.from(scores.entries())
+                .filter(([key]) => key !== "path")
+                .reduce((sum, [, score]) => sum + score, 0);
             
-            // VALID FILTERS: Only consider the filtered relationTypes in maxPossibleScore
-            const relationTypeScore = relationTypes.reduce((sum, type) => {
-                return sum + (current[type] ? 
-                    (Array.isArray(current[type]) ? current[type].length : 1) : 0);
-            }, 0);
+            const totalScore = pathScore + frontmatterScores;
             
-            const maxTypeScore = (includeType && targetType) ? 1 : 0;
-            const maxPossibleScore = 2 + relationTypeScore + maxTypeScore;
+            // Calculate max possible score based on criteria
+            let maxPossibleScore = strictPath ? 0 : 2; // Max path score
             
-            const confidence = (totalScore / maxPossibleScore) * 100;
+            Object.keys(resolvedCriteria).forEach(field => {
+                const targetValue = resolvedCriteria[field];
+                if (targetValue) {
+                    const targetValues = Array.isArray(targetValue) ? targetValue : [targetValue];
+                    maxPossibleScore += targetValues.length * 2; // 2 points per matching value
+                }
+            });
+            
+            const confidence = maxPossibleScore > 0 ? (totalScore / maxPossibleScore) * 100 : 0;
             
             if (debug) {
-                dv.paragraph(`${concept.file.name}: path=${pathScore}, type=${conceptTypeScore}, relations=${relationScores}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
+                const scoreBreakdown = Array.from(scores.entries())
+                    .map(([key, score]) => `${key}=${score}`)
+                    .join(', ');
+                dv.paragraph(`${concept.file.name}: ${scoreBreakdown}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
             }
-            
-            console.log(`${concept.file.name}: path=${pathScore}, relations=${relationScores}, total=${totalScore}/${maxPossibleScore} = ${confidence}%`);
             
             return { 
                 concept, 
@@ -317,17 +380,17 @@ class ConceptManager {
         
         if (debug) {
             dv.paragraph("---");
-            dv.paragraph(`**Step 5: Applying filters**`);
-            dv.paragraph(`Subject filter: ${subject || currentSubject}`);
+            dv.paragraph(`**Step ${stepCounter + 1}: Applying filters**`);
+            dv.paragraph(`Search filters: ${Object.keys(searchFilters).length > 0 ? 
+                Object.entries(searchFilters).map(([k,v]) => `${k}=${v}`).join(', ') : 'none'}`);
             dv.paragraph(`Strict path mode: ${strictPath}`);
             dv.paragraph(`Minimum confidence: > 0%`);
         }
         
         const filtered = results
             .filter(r => !strictPath || r.inSamePath) // Only include same-path files if strictPath is true
-            .sort((a, b) => b.confidence - a.confidence)
             .filter(r => r.confidence > 0)
-            .filter(r => r.concept.subject === (subject || currentSubject));
+            .sort((a, b) => b.confidence - a.confidence);
             
         if (debug) {
             dv.paragraph(`**Final Results: ${filtered.length} concepts**`);
