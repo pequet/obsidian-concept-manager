@@ -15,14 +15,28 @@
  * Usage:
  *   - Initial Test
  *   ```dataviewjs
- *   const { ConceptManager } = CustomJS;
+ *   const { ConceptManager } = customJS;
  *   ConceptManager.helloWorld();
  *   ```
- *   - Basic Usage
+ *   - Dynamic System (Recommended)
  *   ```dataviewjs
- *   const { ConceptManager } = CustomJS;
- *   ConceptManager.getRelatedConcepts({ dv });
+ *   const { ConceptManager } = customJS;
+ *   ConceptManager.getRelatedConcepts({ 
+ *     dv, 
+ *     matchCriteria: {
+ *       [any frontmatter field]: true       // Use current page's value for this field
+ *       [any frontmatter field]: "value"    // Use explicit value for this field
+ *       [any frontmatter field]: null       // Ignore this field
+ *       [any frontmatter field]: false      // Ignore this field
+ *       [any frontmatter field]: ["value1", "value2", ...]    // Use explicit values for this field
+ *     },
+ *     debug: true 
+ *   });
  *   ```
+ * 
+ * Support the Project:
+ *   - Buy Me a Coffee: https://buymeacoffee.com/pequet
+ *   - GitHub Sponsors: https://github.com/sponsors/pequet
  */
 
 class ConceptManager {
@@ -121,14 +135,22 @@ class ConceptManager {
      * 
      * Scoring system:
      * 1. Frontmatter field matching: 2 points each for matching any specified frontmatter fields
-     * 2. Path proximity (automatic): 2 points for files in exact same folder, 1 point for files in subfolders  
+     * 2. Path proximity (optional): 2 points for files in exact same folder, 1 point for files in subfolders  
      * 
      * @param {Object} params - Parameters object
      * @param {Object} params.dv - DataView API object
      * @param {Object} params.matchCriteria - Object specifying which frontmatter fields to match on
      *   - Key: frontmatter field name (e.g., 'type', 'subject', 'level', 'domain')  
      *   - Value: true (use current page's value), string (explicit value), or null/false (ignore)
+     *   - If empty, defaults to: { subject: true, type: true, domain: true }
+     * @param {boolean|string} params.includePath - Path scoring mode:
+     *   - true: Include path scoring (2 points same folder, 1 point subfolders) - DEFAULT
+     *   - false: Disable path scoring completely
+     *   - "strict": Only return files from same path (sets strictPath=true)
      * @param {boolean} params.strictPath - Only return same-path files if true (default: false)
+     * @param {number} params.minScore - Minimum confidence score to include (0.0-1.0, default: 0.66)
+     * @param {number} params.maxResults - Maximum number of results to return (default: 10)
+     * @param {number} params.scoreMultiplier - Points awarded per matching frontmatter value (default: 1.5)
      * @param {boolean} params.debug - Show detailed debug output (default: false)
      * @returns {Array} Array of related concepts with scores, sorted by total score
      * 
@@ -167,8 +189,32 @@ class ConceptManager {
      *   debug: true 
      * })
      */
-    getRelatedConcepts({ dv, matchCriteria = {}, strictPath = false, debug = false }) {
+    getRelatedConcepts({ 
+        dv, 
+        matchCriteria = {}, 
+        includePath = true, 
+        strictPath = false, 
+        minScore = 0.66, 
+        maxResults = 10, 
+        scoreMultiplier = 1.5,
+        debug = false 
+    }) {
         const current = dv.current();
+        
+        // Handle includePath modes
+        if (includePath === "strict") {
+            strictPath = true;
+            includePath = true;
+        }
+        
+        // Set default matchCriteria if none provided
+        if (Object.keys(matchCriteria).length === 0) {
+            matchCriteria = {
+                subject: true,
+                type: true,
+                domain: true
+            };
+        }
         
         // Process matchCriteria to get actual values to match on
         const resolvedCriteria = {};
@@ -197,24 +243,30 @@ class ConceptManager {
         if (debug) {
             dv.header(3, "🐛 DEBUG: ConceptManager.getRelatedConcepts()");
             dv.paragraph(`**Current file:** ${current.file.path}`);
+            dv.paragraph(`**Parameters:**`);
+            dv.paragraph(`  • includePath: ${includePath}`);
+            dv.paragraph(`  • strictPath: ${strictPath}`);
+            dv.paragraph(`  • minScore: ${minScore}`);
+            dv.paragraph(`  • maxResults: ${maxResults}`);
             dv.paragraph(`**Current frontmatter values:**`);
             Object.keys(current).forEach(key => {
                 if (typeof current[key] !== 'function' && key !== 'file') {
                     dv.paragraph(`  • ${key}: ${Array.isArray(current[key]) ? current[key].join(', ') : current[key]}`);
                 }
             });
-            dv.paragraph(`**Match criteria requested:**`);
-            Object.keys(matchCriteria).forEach(field => {
-                dv.paragraph(`  • ${field}: ${matchCriteria[field]} → ${resolvedCriteria[field] || 'ignored'}`);
+            dv.paragraph(`**Match criteria resolved:**`);
+            Object.keys(resolvedCriteria).forEach(field => {
+                const value = resolvedCriteria[field];
+                const displayValue = Array.isArray(value) ? value.join(', ') : (value || 'undefined');
+                dv.paragraph(`  • ${field}: ${displayValue}`);
             });
-            dv.paragraph(`**Strict path mode:** ${strictPath}`);
             dv.paragraph("---");
         }
         
-        // Get files in same directory structure (unless strictPath is disabled)
+        // Get files in same directory structure (if path scoring is enabled)
         const relatedConcepts = new Map();
         
-        if (!strictPath) {
+        if (includePath) {
             const pathFiles = this.getFilesInSamePath({ dv, currentPath: current.file.path });
         
         if (debug) {
@@ -285,10 +337,16 @@ class ConceptManager {
             // Find all files that match this criteria
             const matchingConcepts = dv.pages()
                 .where(p => {
-                    // Apply subject filter if it's in searchFilters
-                    if (searchFilters.subject && p.subject !== searchFilters.subject) return false;
-                    // Apply domain filter if it's in searchFilters  
-                    if (searchFilters.domain && p.domain !== searchFilters.domain) return false;
+                    // Apply subject filter if it's in searchFilters (handle arrays properly)
+                    if (searchFilters.subject) {
+                        const searchSubjects = Array.isArray(searchFilters.subject) ? searchFilters.subject : [searchFilters.subject];
+                        if (!searchSubjects.includes(p.subject)) return false;
+                    }
+                    // Apply domain filter if it's in searchFilters (handle arrays properly)
+                    if (searchFilters.domain) {
+                        const searchDomains = Array.isArray(searchFilters.domain) ? searchFilters.domain : [searchFilters.domain];
+                        if (!searchDomains.includes(p.domain)) return false;
+                    }
                     
                     // Check if this field matches
                     const pageValue = p[field];
@@ -300,13 +358,14 @@ class ConceptManager {
             });
             
             if (debug) {
-                dv.paragraph(`Found ${matchingConcepts.length} files matching '${field}' criteria:`);
-                if (matchingConcepts.length > 0) {
-                    matchingConcepts.forEach(c => {
-                        const pageValues = Array.isArray(c[field]) ? c[field] : [c[field]];
-                        dv.paragraph(`  • ${c.file.name}: ${field} = ${pageValues.join(', ')}`);
-                    });
-                }
+                dv.paragraph(`Found ${matchingConcepts.length} files matching '${field}' criteria.`);
+                // TMI: Uncomment to see the matching values and their scores   
+                // if (matchingConcepts.length > 0) {
+                //     matchingConcepts.forEach(c => {
+                //         const pageValues = Array.isArray(c[field]) ? c[field] : [c[field]];
+                //         dv.paragraph(`  • ${c.file.name}: ${field} = ${pageValues.join(', ')}`);
+                //     });
+                // }
             }
     
             // Add scores for each matching concept
@@ -322,11 +381,11 @@ class ConceptManager {
                 const conceptValues = Array.isArray(concept[field]) ? 
                     concept[field] : [concept[field]];
                 const matchingValues = targetValues.filter(v => conceptValues.includes(v));
-                relatedConcepts.get(conceptId).scores.set(field, matchingValues.length * 2); // 2 points per match
-                
-                if (debug) {
-                    dv.paragraph(`  → ${concept.file.name}: ${matchingValues.length} matching values (${matchingValues.join(', ')}) = ${matchingValues.length * 2} points`);
-                }
+                relatedConcepts.get(conceptId).scores.set(field, matchingValues.length * scoreMultiplier); // points per match
+                // TMI: Uncomment to see the matching values and their scores
+                // if (debug) {
+                //     dv.paragraph(`  → ${concept.file.name}: ${matchingValues.length} matching values (${matchingValues.join(', ')}) = ${matchingValues.length * scoreMultiplier} points`); // points per match
+                // }
             });
             
             if (debug) {
@@ -358,7 +417,7 @@ class ConceptManager {
                 const targetValue = resolvedCriteria[field];
                 if (targetValue) {
                     const targetValues = Array.isArray(targetValue) ? targetValue : [targetValue];
-                    maxPossibleScore += targetValues.length * 2; // 2 points per matching value
+                    maxPossibleScore += targetValues.length * scoreMultiplier; // points per matching value
                 }
             });
             
@@ -368,7 +427,12 @@ class ConceptManager {
                 const scoreBreakdown = Array.from(scores.entries())
                     .map(([key, score]) => `${key}=${score}`)
                     .join(', ');
-                dv.paragraph(`${concept.file.name}: ${scoreBreakdown}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
+                if (confidence >= minScore * 100) {
+                    dv.paragraph(`✓ ${concept.file.name}: ${scoreBreakdown}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
+                } else {
+                    // TMI: Uncomment to see the score breakdown
+                    // dv.paragraph(`✗ ${concept.file.name}: ${scoreBreakdown}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
+                }
             }
             
             return { 
@@ -384,31 +448,69 @@ class ConceptManager {
             dv.paragraph(`Search filters: ${Object.keys(searchFilters).length > 0 ? 
                 Object.entries(searchFilters).map(([k,v]) => `${k}=${v}`).join(', ') : 'none'}`);
             dv.paragraph(`Strict path mode: ${strictPath}`);
-            dv.paragraph(`Minimum confidence: > 0%`);
+            dv.paragraph(`Minimum confidence: ${(minScore * 100).toFixed(1)}%`);
+            dv.paragraph(`Max results: ${maxResults}`);
         }
         
         const filtered = results
             .filter(r => !strictPath || r.inSamePath) // Only include same-path files if strictPath is true
-            .filter(r => r.confidence > 0)
-            .sort((a, b) => b.confidence - a.confidence);
+            .sort((a, b) => b.confidence - a.confidence)
+            .filter(r => r.confidence >= minScore * 100) // Apply minimum score threshold
+            .slice(0, maxResults); // Apply max results limit
             
         if (debug) {
-            dv.paragraph(`**Final Results: ${filtered.length} concepts**`);
-            if (filtered.length > 0) {
-                dv.table(
-                    ["Concept", "Confidence", "Same Path", "Type", "Domain", "Subject"],
-                    filtered.map(r => [
-                        r.concept.file.name,
-                        `${r.confidence.toFixed(2)}%`,
-                        r.inSamePath ? "✓" : "✗",
-                        r.concept.type,
-                        r.concept.domain,
-                        r.concept.subject
-                    ])
-                );
+            // Debug: Show what's in resolvedCriteria
+            dv.paragraph(`**Debug Info:**`);
+            dv.paragraph(`Resolved criteria: ${Object.keys(resolvedCriteria).map(k => `${k}=${resolvedCriteria[k]}`).join(', ')}`);
+            
+            // Show ALL results in debug table (unfiltered)
+            dv.paragraph(`**All Results: ${results.length} concepts found**`);
+            if (results.length > 0) {
+                // Build dynamic table columns based on what was actually used
+                const columns = ["Concept", "Confidence"];
+                
+                // Add path column if path scoring was enabled
+                if (includePath) {
+                    columns.push("Same Path");
+                }
+                
+                // Add columns for each criteria that was used (ensure we have the field)
+                Object.keys(resolvedCriteria).forEach(field => {
+                    if (resolvedCriteria[field] !== undefined && resolvedCriteria[field] !== null) {
+                        const capitalizedField = field.charAt(0).toUpperCase() + field.slice(1);
+                        columns.push(capitalizedField);
+                    }
+                });
+                
+                // Build table rows for ALL results
+                const rows = results.map(r => {
+                    const row = [
+                        r.concept.file.link,
+                        `${r.confidence.toFixed(2)}%`
+                    ];
+                    
+                    // Add path column if enabled
+                    if (includePath) {
+                        row.push(r.inSamePath ? "✓" : "✗");
+                    }
+                    
+                    // Add values for each criteria (only if field is defined)
+                    Object.keys(resolvedCriteria).forEach(field => {
+                        if (resolvedCriteria[field] !== undefined && resolvedCriteria[field] !== null) {
+                            const value = r.concept[field];
+                            row.push(Array.isArray(value) ? value.join(', ') : (value || '-'));
+                        }
+                    });
+                    
+                    return row;
+                });
+                
+                dv.table(columns, rows);
             } else {
                 dv.paragraph("❌ No concepts found matching the criteria");
             }
+            
+            dv.paragraph(`**Filtered Results: ${filtered.length} concepts (after minScore=${(minScore * 100).toFixed(1)}%, maxResults=${maxResults})**`);
             dv.paragraph("---");
         }
         
