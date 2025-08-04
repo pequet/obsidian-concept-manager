@@ -32,7 +32,6 @@ Get related concepts for the current note:
 ```dataviewjs
 const { ConceptManager } = customJS;
 const related = ConceptManager.getRelatedConcepts({ dv });
-
 dv.table(["Concept", "Confidence"], related.map(r => [r.concept.file.link, `${r.confidence.toFixed(2)}%`]));
 ```
 
