@@ -128,7 +128,7 @@ class ConceptWrappers {
      */
     renderConceptFooter(dv, options = {}) {
         const defaultOptions = {
-            headerText: "Related Concepts",
+            headerText: "Related Content",
             headerLevel: DEFAULT_HEADER_LEVEL,
             conceptOptions: {
                 matchCriteria: { type: true, subject: true },
@@ -164,7 +164,7 @@ class ConceptWrappers {
      */
     renderHubFooter(dv, options = {}) {
         const defaultOptions = {
-            headerText: "Other Hubs",
+            headerText: "Related Content",
             headerLevel: DEFAULT_HEADER_LEVEL,
             conceptOptions: {
                 matchCriteria: { 

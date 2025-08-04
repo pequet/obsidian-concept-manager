@@ -150,6 +150,8 @@ class ConceptManager {
      * @param {boolean} params.strictPath - Only return same-path files if true (default: false)
      * @param {number} params.minScore - Minimum confidence score to include (0.0-1.0, default: 0.66)
      * @param {number} params.maxResults - Maximum number of results to return (default: 10)
+     * @param {boolean} params.strictMaxResults - Apply max results limit strictly (default: false). 
+     *   If false, continues showing results with same confidence score as the last included result.
      * @param {number} params.scoreMultiplier - Points awarded per matching frontmatter value (default: 1.5)
      * @param {boolean} params.debug - Show detailed debug output (default: false)
      * @returns {Array} Array of related concepts with scores, sorted by total score
@@ -196,6 +198,7 @@ class ConceptManager {
         strictPath = false, 
         minScore = 0.66, 
         maxResults = 10, 
+        strictMaxResults = false,
         scoreMultiplier = 1.5,
         debug = false 
     }) {
@@ -248,6 +251,7 @@ class ConceptManager {
             dv.paragraph(`  • strictPath: ${strictPath}`);
             dv.paragraph(`  • minScore: ${minScore}`);
             dv.paragraph(`  • maxResults: ${maxResults}`);
+            dv.paragraph(`  • strictMaxResults: ${strictMaxResults}`);
             dv.paragraph(`**Current frontmatter values:**`);
             Object.keys(current).forEach(key => {
                 if (typeof current[key] !== 'function' && key !== 'file') {
@@ -450,13 +454,42 @@ class ConceptManager {
             dv.paragraph(`Strict path mode: ${strictPath}`);
             dv.paragraph(`Minimum confidence: ${(minScore * 100).toFixed(1)}%`);
             dv.paragraph(`Max results: ${maxResults}`);
+            dv.paragraph(`Strict max results: ${strictMaxResults}`);
         }
         
-        const filtered = results
+        // Apply filtering and sorting
+        const sortedResults = results
             .filter(r => !strictPath || r.inSamePath) // Only include same-path files if strictPath is true
             .sort((a, b) => b.confidence - a.confidence)
-            .filter(r => r.confidence >= minScore * 100) // Apply minimum score threshold
-            .slice(0, maxResults); // Apply max results limit
+            .filter(r => r.confidence >= minScore * 100); // Apply minimum score threshold
+        
+        // Apply max results limit with optional strict mode
+        let filtered;
+        if (strictMaxResults) {
+            // Strict mode: simply cut off at maxResults
+            filtered = sortedResults.slice(0, maxResults);
+        } else {
+            // Non-strict mode: include all results with same confidence as the last included result
+            if (sortedResults.length <= maxResults) {
+                filtered = sortedResults;
+            } else {
+                // Get initial results up to maxResults
+                filtered = sortedResults.slice(0, maxResults);
+                
+                // Get the confidence score of the last included result
+                const lastIncludedScore = filtered[filtered.length - 1].confidence;
+                
+                // Continue adding results that have the same confidence score
+                for (let i = maxResults; i < sortedResults.length; i++) {
+                    if (sortedResults[i].confidence === lastIncludedScore) {
+                        filtered.push(sortedResults[i]);
+                    } else {
+                        // Once we hit a different score, stop
+                        break;
+                    }
+                }
+            }
+        }
             
         if (debug) {
             // Debug: Show what's in resolvedCriteria
@@ -510,7 +543,10 @@ class ConceptManager {
                 dv.paragraph("❌ No concepts found matching the criteria");
             }
             
-            dv.paragraph(`**Filtered Results: ${filtered.length} concepts (after minScore=${(minScore * 100).toFixed(1)}%, maxResults=${maxResults})**`);
+            const filterDescription = strictMaxResults ? 
+                `strict maxResults=${maxResults}` : 
+                `maxResults=${maxResults} (non-strict, included ${filtered.length > maxResults ? filtered.length - maxResults : 0} additional results with same confidence)`;
+            dv.paragraph(`**Filtered Results: ${filtered.length} concepts (after minScore=${(minScore * 100).toFixed(1)}%, ${filterDescription})**`);
             dv.paragraph("---");
         }
         
