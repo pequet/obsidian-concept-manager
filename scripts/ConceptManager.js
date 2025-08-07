@@ -152,17 +152,30 @@ class ConceptManager {
      * @param {Object} params.dv - Dataview API object  
      * @param {string} params.currentPath - Full path to the current file
      * @param {Array} params.validSubjects - Array of valid subjects to limit scope (prevents vault-wide scanning)
+     * @param {Array} params.validDomains - Array of valid domains to limit scope (prevents irrelevant domain matches)
      * @param {number} [params.maxDistance=10] - Maximum distance to consider (performance optimization)
      * @returns {Array} Array of {file, distance} objects sorted by distance
      */
-    getRelatedFilesByDistance({ dv, currentPath, validSubjects = [], maxDistance = 10 }) {
+    getRelatedFilesByDistance({ dv, currentPath, validSubjects = [], validDomains = [], maxDistance = 10 }) {
         const relatedFiles = [];
         
-        // Only scan files with valid subjects to limit scope
-        const candidateFiles = dv.pages()
-            .where(p => p.file.path !== currentPath && 
-                       (validSubjects.length === 0 || validSubjects.includes(p.subject)))
-            .array();
+        // Get all files first (excluding current file)
+        const allFiles = dv.pages().where(p => p.file.path !== currentPath).array();
+        
+        // Apply subject filtering
+        const subjectFilteredFiles = validSubjects.length === 0 ? allFiles : 
+            allFiles.filter(p => validSubjects.includes(p.subject));
+        
+        // Apply domain filtering
+        const candidateFiles = validDomains.length === 0 ? subjectFilteredFiles :
+            subjectFilteredFiles.filter(p => validDomains.includes(p.domain));
+        
+        // Debug information for troubleshooting
+        console.log(`[DEBUG] getRelatedFilesByDistance filtering:
+          - Total files (excluding current): ${allFiles.length}
+          - After subject filtering [${validSubjects.join(', ')}]: ${subjectFilteredFiles.length}
+          - After domain filtering [${validDomains.join(', ')}]: ${candidateFiles.length}
+          - Sample domains found: ${[...new Set(allFiles.map(p => p.domain).filter(Boolean))].slice(0, 5).join(', ')}`);
         
         candidateFiles.forEach(file => {
             const distance = this.calculatePathDistance(currentPath, file.file.path);
@@ -286,8 +299,8 @@ class ConceptManager {
         strictMaxResults = false,
         scoreMultiplier = 1.5,
         reverseScoreMultiplier = 2.5,
-        pathDistanceMultiplier = 2.0,
-        maxPathDistance = 10,
+        pathDistanceMultiplier = 3.0,
+        maxPathDistance = 4,
         debug = false 
     }) {
         const current = dv.current();
@@ -305,15 +318,18 @@ class ConceptManager {
                 dv.paragraph(`✅ Found Config: ${config.debugInfo.configPageName}`);
                 dv.paragraph(`  • valid_filters: [${config.debugInfo.validFilters.join(', ')}]`);
                 dv.paragraph(`  • valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+                dv.paragraph(`  • valid_domains: [${config.debugInfo.validDomains.join(', ')}]`);
             } else if (config.debugInfo.configPagesFound > 1) {
                 dv.paragraph(`⚠️ Warning: Found ${config.debugInfo.configPagesFound} config pages - using first: ${config.debugInfo.configPageName}`);
                 dv.paragraph(`  • All matches: [${config.debugInfo.allConfigMatches.join(', ')}]`);
                 dv.paragraph(`  • valid_filters: [${config.debugInfo.validFilters.join(', ')}]`);
                 dv.paragraph(`  • valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+                dv.paragraph(`  • valid_domains: [${config.debugInfo.validDomains.join(', ')}]`);
             } else {
                 dv.paragraph(`❌ No Config page found for subject "${config.debugInfo.subject}"`);
                 dv.paragraph(`  • Using default valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
                 dv.paragraph(`  • No valid_filters available`);
+                dv.paragraph(`  • No valid_domains available`);
             }
             dv.paragraph("---");
         }
@@ -452,6 +468,7 @@ class ConceptManager {
                 dv, 
                 currentPath: current.file.path, 
                 validSubjects: config.validSubjects,
+                validDomains: config.validDomains,
                 maxDistance: maxPathDistance 
             });
         
@@ -459,6 +476,7 @@ class ConceptManager {
                 dv.paragraph(`**Step 1: Finding files by distance-based path scoring**`);
                 dv.paragraph(`Current file: ${current.file.path}`);
                 dv.paragraph(`Valid subjects: [${config.validSubjects.join(', ')}]`);
+                dv.paragraph(`Valid domains: [${config.validDomains.join(', ')}]`);
                 dv.paragraph(`Max distance: ${maxPathDistance} jumps`);
                 dv.paragraph(`Files found: ${distanceFiles.length} within distance threshold`);
                 
@@ -477,7 +495,7 @@ class ConceptManager {
                         if (files.length <= 5) {
                             dv.list(files);
                         } else {
-                            dv.list(files.slice(0, 300).concat([`... and ${files.length - 3} more`]));
+                            dv.list(files.slice(0, 300).concat([`... and ${files.length - 300} more`]));
                         }
                     });
                 }
@@ -856,24 +874,44 @@ class ConceptManager {
             debug: debug
         });
 
+        // Apply domain validation using config
+        const domainFiltering = this.filterPagesByValidDomains({
+            pages: subjectFiltering.filtered,
+            validDomains: config.validDomains,
+            currentPagePath: current.file.path,
+            debug: debug
+        });
+
         if (debug) {
             dv.paragraph(`**Final Subject Filtering (Safety Check):**`);
             dv.paragraph(`  • Input concepts: ${subjectFiltering.debugInfo.inputCount}`);
             dv.paragraph(`  • Valid subjects: [${subjectFiltering.debugInfo.validSubjects.join(', ')}]`);
-            dv.paragraph(`  • Concepts after final filtering: ${subjectFiltering.debugInfo.filteredCount}`);
+            dv.paragraph(`  • Concepts after subject filtering: ${subjectFiltering.debugInfo.filteredCount}`);
             if (subjectFiltering.debugInfo.inputCount === subjectFiltering.debugInfo.filteredCount) {
-                dv.paragraph(`  • ✅ No additional filtering needed (queries already filtered by valid subjects)`);
+                dv.paragraph(`  • ✅ No additional subject filtering needed (queries already filtered by valid subjects)`);
             } else {
-                dv.paragraph(`  • ⚠️ Additional filtering applied: ${subjectFiltering.debugInfo.inputCount - subjectFiltering.debugInfo.filteredCount} concepts removed`);
+                dv.paragraph(`  • ⚠️ Additional subject filtering applied: ${subjectFiltering.debugInfo.inputCount - subjectFiltering.debugInfo.filteredCount} concepts removed`);
             }
             if (subjectFiltering.debugInfo.excludedCurrentPage) {
                 dv.paragraph(`  • Current page already excluded in queries: ${subjectFiltering.debugInfo.currentPagePath}`);
             }
+            
+            dv.paragraph(`**Final Domain Filtering (Safety Check):**`);
+            dv.paragraph(`  • Input concepts: ${domainFiltering.debugInfo.inputCount}`);
+            dv.paragraph(`  • Valid domains: [${domainFiltering.debugInfo.validDomains.join(', ')}]`);
+            dv.paragraph(`  • Concepts after domain filtering: ${domainFiltering.debugInfo.filteredCount}`);
+            if (domainFiltering.debugInfo.noFiltering) {
+                dv.paragraph(`  • ✅ No domain filtering applied (no valid_domains configured)`);
+            } else if (domainFiltering.debugInfo.inputCount === domainFiltering.debugInfo.filteredCount) {
+                dv.paragraph(`  • ✅ No additional domain filtering needed (queries already filtered by valid domains)`);
+            } else {
+                dv.paragraph(`  • ⚠️ Additional domain filtering applied: ${domainFiltering.debugInfo.inputCount - domainFiltering.debugInfo.filteredCount} concepts removed`);
+            }
         }
         
-        // Rebuild the filtered results with only valid subjects
+        // Rebuild the filtered results with only valid subjects and domains
         const finalResults = filtered.filter(result => 
-            subjectFiltering.filtered.some(validPage => 
+            domainFiltering.filtered.some(validPage => 
                 validPage.file.path === result.concept.file.path
             )
         );
@@ -980,9 +1018,10 @@ class ConceptManager {
             
         const configPage = configPages.length > 0 ? configPages[0] : null;
         
-        // Extract valid filters and subjects from config
+        // Extract valid filters, subjects, and domains from config
         let validFilters = configPage ? (configPage.valid_filters || []) : [];
         let validSubjects = configPage ? (configPage.valid_subjects || []) : [];
+        let validDomains = configPage ? (configPage.valid_domains || []) : [];
         
         // If no valid subjects found, default to current subject
         if (!validSubjects.length) {
@@ -996,12 +1035,14 @@ class ConceptManager {
             allConfigMatches: configPages.map(p => p.file.name),
             validFilters,
             validSubjects,
+            validDomains,
             hasConfig: !!configPage
         };
         
         return {
             validFilters,
             validSubjects,
+            validDomains,
             configPage,
             hasConfig: !!configPage,
             debugInfo
@@ -1066,6 +1107,43 @@ class ConceptManager {
         const debugInfo = {
             inputCount: pages.length,
             validSubjects,
+            filteredCount: filtered.length,
+            excludedCurrentPage: currentPagePath ? true : false,
+            currentPagePath
+        };
+        
+        return { filtered, debugInfo };
+    }
+
+    filterPagesByValidDomains({ pages, validDomains, currentPagePath = null, debug = false }) {
+        // If no valid domains specified, return all pages
+        if (!validDomains || validDomains.length === 0) {
+            return {
+                filtered: pages,
+                debugInfo: {
+                    inputCount: pages.length,
+                    validDomains: [],
+                    filteredCount: pages.length,
+                    excludedCurrentPage: currentPagePath ? true : false,
+                    currentPagePath,
+                    noFiltering: true
+                }
+            };
+        }
+
+        const filtered = pages.filter(page => {
+            // Exclude current page if specified
+            if (currentPagePath && page.file.path === currentPagePath) {
+                return false;
+            }
+            
+            // Check if page domain is in valid domains
+            return validDomains.includes(page.domain);
+        });
+        
+        const debugInfo = {
+            inputCount: pages.length,
+            validDomains,
             filteredCount: filtered.length,
             excludedCurrentPage: currentPagePath ? true : false,
             currentPagePath
@@ -1303,13 +1381,29 @@ class ConceptManager {
                     debug: debug
                 });
                 
-                const pages = pageFiltering.filtered;
+                // Apply domain validation
+                const domainFiltering = this.filterPagesByValidDomains({
+                    pages: pageFiltering.filtered,
+                    validDomains: config.validDomains,
+                    currentPagePath: currentPage.file.path,
+                    debug: debug
+                });
+                
+                const pages = domainFiltering.filtered;
                 
                 if (debug) {
                     dv.paragraph(`**Subject Filtering for Hub Pages:**`);
-                    dv.paragraph(`  • Before filtering: ${pageFiltering.debugInfo.inputCount} pages`);
-                    dv.paragraph(`  • After filtering: ${pageFiltering.debugInfo.filteredCount} pages`);
+                    dv.paragraph(`  • Before subject filtering: ${pageFiltering.debugInfo.inputCount} pages`);
+                    dv.paragraph(`  • After subject filtering: ${pageFiltering.debugInfo.filteredCount} pages`);
                     dv.paragraph(`  • Valid subjects: [${pageFiltering.debugInfo.validSubjects.join(', ')}]`);
+                    
+                    dv.paragraph(`**Domain Filtering for Hub Pages:**`);
+                    dv.paragraph(`  • Before domain filtering: ${domainFiltering.debugInfo.inputCount} pages`);
+                    dv.paragraph(`  • After domain filtering: ${domainFiltering.debugInfo.filteredCount} pages`);
+                    dv.paragraph(`  • Valid domains: [${domainFiltering.debugInfo.validDomains.join(', ')}]`);
+                    if (domainFiltering.debugInfo.noFiltering) {
+                        dv.paragraph(`  • ✅ No domain filtering applied (no valid_domains configured)`);
+                    }
                 }
 
                 if (debug) {
@@ -1475,13 +1569,29 @@ class ConceptManager {
                         debug: debug
                     });
                     
-                    const relatedGroups = groupFiltering.filtered.sort(p => p.file.name);
+                    // Apply domain validation
+                    const domainFiltering = this.filterPagesByValidDomains({
+                        pages: groupFiltering.filtered,
+                        validDomains: config.validDomains,
+                        currentPagePath: currentPage.file.path,
+                        debug: debug
+                    });
+                    
+                    const relatedGroups = domainFiltering.filtered.sort(p => p.file.name);
                     
                     if (debug) {
                         dv.paragraph(`**Subject Filtering for Related Groups:**`);
-                        dv.paragraph(`  • Before filtering: ${groupFiltering.debugInfo.inputCount} groups`);
-                        dv.paragraph(`  • After filtering: ${groupFiltering.debugInfo.filteredCount} groups`);
+                        dv.paragraph(`  • Before subject filtering: ${groupFiltering.debugInfo.inputCount} groups`);
+                        dv.paragraph(`  • After subject filtering: ${groupFiltering.debugInfo.filteredCount} groups`);
                         dv.paragraph(`  • Valid subjects: [${groupFiltering.debugInfo.validSubjects.join(', ')}]`);
+                        
+                        dv.paragraph(`**Domain Filtering for Related Groups:**`);
+                        dv.paragraph(`  • Before domain filtering: ${domainFiltering.debugInfo.inputCount} groups`);
+                        dv.paragraph(`  • After domain filtering: ${domainFiltering.debugInfo.filteredCount} groups`);
+                        dv.paragraph(`  • Valid domains: [${domainFiltering.debugInfo.validDomains.join(', ')}]`);
+                        if (domainFiltering.debugInfo.noFiltering) {
+                            dv.paragraph(`  • ✅ No domain filtering applied (no valid_domains configured)`);
+                        }
                     }
                         
                     if (debug) {
@@ -1758,13 +1868,29 @@ class ConceptManager {
                     debug: debug
                 });
                 
-                const matchingPages = pageMatching.filtered.sort(p => p.file.name);
+                // Apply domain validation
+                const domainMatching = this.filterPagesByValidDomains({
+                    pages: pageMatching.filtered,
+                    validDomains: config.validDomains,
+                    currentPagePath: currentPage.file.path,
+                    debug: debug
+                });
+                
+                const matchingPages = domainMatching.filtered.sort(p => p.file.name);
                 
                 if (debug) {
                     dv.paragraph(`**Subject Filtering for Group Items:**`);
-                    dv.paragraph(`  • Before filtering: ${pageMatching.debugInfo.inputCount} pages`);
-                    dv.paragraph(`  • After filtering: ${pageMatching.debugInfo.filteredCount} pages`);
+                    dv.paragraph(`  • Before subject filtering: ${pageMatching.debugInfo.inputCount} pages`);
+                    dv.paragraph(`  • After subject filtering: ${pageMatching.debugInfo.filteredCount} pages`);
                     dv.paragraph(`  • Valid subjects: [${pageMatching.debugInfo.validSubjects.join(', ')}]`);
+                    
+                    dv.paragraph(`**Domain Filtering for Group Items:**`);
+                    dv.paragraph(`  • Before domain filtering: ${domainMatching.debugInfo.inputCount} pages`);
+                    dv.paragraph(`  • After domain filtering: ${domainMatching.debugInfo.filteredCount} pages`);
+                    dv.paragraph(`  • Valid domains: [${domainMatching.debugInfo.validDomains.join(', ')}]`);
+                    if (domainMatching.debugInfo.noFiltering) {
+                        dv.paragraph(`  • ✅ No domain filtering applied (no valid_domains configured)`);
+                    }
                 }
                 
                 if (debug) {
