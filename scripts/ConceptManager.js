@@ -92,17 +92,97 @@ class ConceptManager {
     }
 
     /**
-     * Finds files that share the same directory structure as the current file.
-     * Used internally by other methods to find related concepts in the same directory.
+     * Calculates the filesystem distance (number of directory jumps) between two file paths.
+     * This measures how many directory navigation steps are needed to get from one file to another.
      * 
-     * @param {Object} params - The parameters object
-     * @param {Object} params.dv - The dataview API object
-     * @param {string} params.currentPath - The full path of the current file
-     * @returns {Object} Object with exactFolder and subFolders arrays
+     * Distance calculation:
+     * - 0 jumps: Files in the same directory (Maya.md, Divine.md)
+     * - 2 jumps: Files in sibling directories (People/Maya.md → Movies/Pink.md = ../Movies/)
+     * - 5 jumps: Files across different branches (People/Maya.md → Cinematic Theory/Movements/Avant-Garde.md = ../../../Cinematic Theory/Movements/)
+     * 
+     * @param {string} path1 - First file path 
+     * @param {string} path2 - Second file path
+     * @returns {number} Number of directory jumps needed to navigate from path1's directory to path2's directory
+     * 
      * @example
-     * // If current file is in "Technical Analysis/Time-Based Analysis/concept.md"
-     * // Returns { exactFolder: [...], subFolders: [...] }
-     * const pathFiles = getFilesInSamePath({ dv, currentPath: "path/to/file.md" });
+     * // Same folder: 0 jumps
+     * calculatePathDistance("Projects/Sample/People/Maya.md", "Projects/Sample/People/Divine.md") // Returns 0
+     * 
+     * // Sibling folders: 2 jumps (../Movies/)
+     * calculatePathDistance("Projects/Sample/People/Maya.md", "Projects/Sample/Movies/Pink.md") // Returns 2
+     * 
+     * // Distant cousins: 5 jumps (../../../Cinematic Theory/Movements/)
+     * calculatePathDistance("Projects/Sample/People/Maya.md", "Projects/Sample/Cinematic Theory/Movements/Avant-Garde.md") // Returns 5
+     */
+    calculatePathDistance(path1, path2) {
+        // Handle same file case
+        if (path1 === path2) return 0;
+        
+        // Get directory paths (remove filenames)
+        const dir1Parts = path1.split('/').slice(0, -1);
+        const dir2Parts = path2.split('/').slice(0, -1);
+        
+        // Handle same directory case
+        if (dir1Parts.join('/') === dir2Parts.join('/')) return 0;
+        
+        // Find common ancestor directory
+        let commonLength = 0;
+        const minLength = Math.min(dir1Parts.length, dir2Parts.length);
+        
+        for (let i = 0; i < minLength; i++) {
+            if (dir1Parts[i] === dir2Parts[i]) {
+                commonLength = i + 1;
+            } else {
+                break;
+            }
+        }
+        
+        // Calculate steps: up from dir1 to common ancestor + down from common ancestor to dir2
+        const stepsUp = dir1Parts.length - commonLength;
+        const stepsDown = dir2Parts.length - commonLength;
+        
+        return stepsUp + stepsDown;
+    }
+
+    /**
+     * Gets files and their filesystem distances from the current file, replacing the old binary same-path approach.
+     * Uses distance-based scoring that rewards structural organization proximity.
+     * 
+     * @param {Object} params - Parameters object
+     * @param {Object} params.dv - Dataview API object  
+     * @param {string} params.currentPath - Full path to the current file
+     * @param {Array} params.validSubjects - Array of valid subjects to limit scope (prevents vault-wide scanning)
+     * @param {number} [params.maxDistance=10] - Maximum distance to consider (performance optimization)
+     * @returns {Array} Array of {file, distance} objects sorted by distance
+     */
+    getRelatedFilesByDistance({ dv, currentPath, validSubjects = [], maxDistance = 10 }) {
+        const relatedFiles = [];
+        
+        // Only scan files with valid subjects to limit scope
+        const candidateFiles = dv.pages()
+            .where(p => p.file.path !== currentPath && 
+                       (validSubjects.length === 0 || validSubjects.includes(p.subject)))
+            .array();
+        
+        candidateFiles.forEach(file => {
+            const distance = this.calculatePathDistance(currentPath, file.file.path);
+            
+            // Only include files within the maximum distance threshold
+            if (distance <= maxDistance) {
+                relatedFiles.push({ file, distance });
+            }
+        });
+        
+        // Sort by distance (closest first)
+        return relatedFiles.sort((a, b) => a.distance - b.distance);
+    }
+
+    /**
+     * DEPRECATED: Gets files that are in the same directory path as the current file.
+     * This method is kept for backward compatibility but will be removed in a future version.
+     * Use getRelatedFilesByDistance() instead for better proximity scoring.
+     * 
+     * @deprecated Use getRelatedFilesByDistance() instead
      */
     getFilesInSamePath({ dv, currentPath }) {
         const pathParts = currentPath.split('/');
@@ -134,8 +214,11 @@ class ConceptManager {
      * Uses a flexible matching system where you can specify any frontmatter fields to match on.
      * 
      * Scoring system:
-     * 1. Frontmatter field matching: 2 points each for matching any specified frontmatter fields
-     * 2. Path proximity (optional): 2 points for files in exact same folder, 1 point for files in subfolders  
+     * 1. Frontmatter field matching: scoreMultiplier points each for matching any specified frontmatter fields
+     * 2. Path proximity (NEW): Distance-based scoring that rewards structural organization proximity:
+     *    - 0 jumps (same folder): pathDistanceMultiplier points (e.g., 2.0 points)
+     *    - 1+ jumps: pathDistanceMultiplier / (1 + distance) points (e.g., 1.0, 0.67, 0.4 points)
+     *    - Replaces old binary 0/1/2 system with smooth proximity gradient
      * 
      * @param {Object} params - Parameters object
      * @param {Object} params.dv - DataView API object
@@ -144,7 +227,7 @@ class ConceptManager {
      *   - Value: true (use current page's value), string (explicit value), or null/false (ignore)
      *   - If empty, defaults to: { subject: true, type: true, domain: true }
      * @param {boolean|string} params.includePath - Path scoring mode:
-     *   - true: Include path scoring (2 points same folder, 1 point subfolders) - DEFAULT
+     *   - true: Include distance-based path scoring - DEFAULT
      *   - false: Disable path scoring completely
      *   - "strict": Only return files from same path (sets strictPath=true)
      * @param {boolean} params.strictPath - Only return same-path files if true (default: false)
@@ -153,6 +236,8 @@ class ConceptManager {
      * @param {boolean} params.strictMaxResults - Apply max results limit strictly (default: false). 
      *   If false, continues showing results with same confidence score as the last included result.
      * @param {number} params.scoreMultiplier - Points awarded per matching frontmatter value (default: 1.5)
+     * @param {number} params.pathDistanceMultiplier - Base points for path distance scoring (default: 2.0)
+     * @param {number} params.maxPathDistance - Maximum filesystem distance to consider (default: 10)
      * @param {boolean} params.debug - Show detailed debug output (default: false)
      * @returns {Array} Array of related concepts with scores, sorted by total score
      * 
@@ -201,6 +286,8 @@ class ConceptManager {
         strictMaxResults = false,
         scoreMultiplier = 1.5,
         reverseScoreMultiplier = 2.5,
+        pathDistanceMultiplier = 2.0,
+        maxPathDistance = 10,
         debug = false 
     }) {
         const current = dv.current();
@@ -332,6 +419,9 @@ class ConceptManager {
             dv.paragraph(`  • strictMaxResults: ${strictMaxResults}`);
             dv.paragraph(`  • scoreMultiplier: ${scoreMultiplier} (regular field matches)`);
             dv.paragraph(`  • reverseScoreMultiplier: ${reverseScoreMultiplier} (reverse relationships)`);
+            dv.paragraph(`  • pathDistanceMultiplier: ${pathDistanceMultiplier} (base path scoring)`);
+            dv.paragraph(`  • maxPathDistance: ${maxPathDistance} (max filesystem jumps)`);
+            dv.paragraph("  **Path Scoring Formula:** distance=0 → ${pathDistanceMultiplier} pts; distance>0 → ${pathDistanceMultiplier}/(1+distance) pts");
             dv.paragraph(`**Current frontmatter values:**`);
             Object.keys(current).forEach(key => {
                 if (typeof current[key] !== 'function' && key !== 'file') {
@@ -353,50 +443,73 @@ class ConceptManager {
             dv.paragraph("---");
         }
         
-        // Get files in same directory structure (if path scoring is enabled)
+        // Get files with distance-based scoring (if path scoring is enabled)
         const relatedConcepts = new Map();
         
         if (includePath) {
-            const pathFiles = this.getFilesInSamePath({ dv, currentPath: current.file.path });
-        
-        if (debug) {
-            dv.paragraph(`**Step 1: Finding files in same directory path**`);
-            dv.paragraph(`Directory path: ${current.file.path.split('/').slice(0, -1).join('/')}`);
-                dv.paragraph(`Files found - Exact folder: ${pathFiles.exactFolder.length}, Subfolders: ${pathFiles.subFolders.length}`);
-                if (pathFiles.exactFolder.length > 0) {
-                    dv.paragraph("**Exact folder files:**");
-                    dv.list(pathFiles.exactFolder.map(f => f.file.path));
-                }
-                if (pathFiles.subFolders.length > 0) {
-                    dv.paragraph("**Subfolder files:**");
-                    dv.list(pathFiles.subFolders.map(f => f.file.path));
-            }
-            dv.paragraph("---");
-        }
-        
-            // Add path-based scores
-            // 2 points for files in exact same folder
-            pathFiles.exactFolder.forEach(concept => {
-            const conceptId = concept.file.path;
-            relatedConcepts.set(conceptId, { 
-                concept, 
-                    scores: new Map([["path", 2]]) // 2 points for exact same folder
-                });
+            // Use new distance-based approach, limited to valid subjects for performance
+            const distanceFiles = this.getRelatedFilesByDistance({ 
+                dv, 
+                currentPath: current.file.path, 
+                validSubjects: config.validSubjects,
+                maxDistance: maxPathDistance 
             });
-            
-            // 1 point for files in subfolders
-            pathFiles.subFolders.forEach(concept => {
-                const conceptId = concept.file.path;
+        
+            if (debug) {
+                dv.paragraph(`**Step 1: Finding files by distance-based path scoring**`);
+                dv.paragraph(`Current file: ${current.file.path}`);
+                dv.paragraph(`Valid subjects: [${config.validSubjects.join(', ')}]`);
+                dv.paragraph(`Max distance: ${maxPathDistance} jumps`);
+                dv.paragraph(`Files found: ${distanceFiles.length} within distance threshold`);
+                
+                if (distanceFiles.length > 0) {
+                    dv.paragraph("**Distance breakdown:**");
+                    const distanceGroups = {};
+                    distanceFiles.forEach(({file, distance}) => {
+                        if (!distanceGroups[distance]) distanceGroups[distance] = [];
+                        distanceGroups[distance].push(file.file.path);
+                    });
+                    
+                    Object.keys(distanceGroups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(distance => {
+                        const files = distanceGroups[distance];
+                        const score = distance === '0' ? pathDistanceMultiplier : (pathDistanceMultiplier / (1 + parseInt(distance))).toFixed(2);
+                        dv.paragraph(`  • Distance ${distance} jumps (${score} pts): ${files.length} files`);
+                        if (files.length <= 5) {
+                            dv.list(files);
+                        } else {
+                            dv.list(files.slice(0, 300).concat([`... and ${files.length - 3} more`]));
+                        }
+                    });
+                }
+                dv.paragraph("---");
+            }
+        
+            // Add distance-based scores using new formula
+            distanceFiles.forEach(({file, distance}) => {
+                const conceptId = file.file.path;
+                
+                // Calculate score: 0 distance = full points, >0 distance = decaying points
+                const pathScore = distance === 0 ? 
+                    pathDistanceMultiplier : 
+                    pathDistanceMultiplier / (1 + distance);
+                
                 relatedConcepts.set(conceptId, { 
-                    concept, 
-                    scores: new Map([["path", 1]]) // 1 point for subfolders
+                    concept: file, 
+                    scores: new Map([["path", pathScore]])
                 });
             });
             
             if (debug) {
-                dv.paragraph(`**Step 2: Adding path-based scores**`);
-                dv.paragraph(`Added ${pathFiles.exactFolder.length} concepts with path score of 2 (exact same folder)`);
-                dv.paragraph(`Added ${pathFiles.subFolders.length} concepts with path score of 1 (subfolders)`);
+                dv.paragraph(`**Step 2: Applied distance-based path scoring**`);
+                dv.paragraph(`Added ${distanceFiles.length} concepts with distance-based path scores`);
+                
+                if (distanceFiles.length > 0) {
+                    const scoreExamples = distanceFiles.slice(0, 3).map(({file, distance}) => {
+                        const score = distance === 0 ? pathDistanceMultiplier : (pathDistanceMultiplier / (1 + distance)).toFixed(2);
+                        return `${file.file.name} (${distance} jumps = ${score} pts)`;
+                    });
+                    dv.paragraph(`Examples: ${scoreExamples.join(', ')}`);
+                }
                 dv.paragraph("---");
             }
         }

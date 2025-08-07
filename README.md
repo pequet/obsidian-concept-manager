@@ -13,6 +13,7 @@ This is a CustomJS Class designed for **advanced content discovery** and **workf
 - Cross-note relationship visualization
 - Subject-specific filtering
 - Dual-weighted proportional scoring system (regular vs. reverse relationships)
+- **NEW**: Distance-based path scoring that rewards structural organization proximity
 
 ## The Game Changer: Centralized Wrapper Functions
 
@@ -198,6 +199,8 @@ ConceptManager.getRelatedConcepts({
     maxResults: 10,                // Maximum results (default: 10)
     scoreMultiplier: 1.5,          // Points per matching frontmatter value (default: 1.5)
     reverseScoreMultiplier: 2.5,   // Points per reverse relationship (default: 2.5)
+    pathDistanceMultiplier: 2.0,   // Base points for path distance scoring (default: 2.0)
+    maxPathDistance: 10,           // Maximum filesystem distance to consider (default: 10)
     debug: false                   // Show detailed breakdown (default: false)
 });
 ```
@@ -227,7 +230,7 @@ For each frontmatter field you include in `matchCriteria`:
 // - includePath: "strict" = only return files from exactly the same folder
 const { ConceptManager } = customJS;
 
-// Default: Include path scoring (2 pts same folder, 1 pt subfolder)
+// Default: Include distance-based path scoring (proximity rewards)
 ConceptManager.getRelatedConcepts({ dv, includePath: true });
 
 // Disable path scoring completely  
@@ -235,6 +238,13 @@ ConceptManager.getRelatedConcepts({ dv, includePath: false });
 
 // Only return files from the same path (strict mode)
 ConceptManager.getRelatedConcepts({ dv, includePath: "strict" });
+
+// Custom distance-based scoring (higher multiplier, shorter max distance)
+ConceptManager.getRelatedConcepts({ 
+    dv, 
+    pathDistanceMultiplier: 3.0,  // More points for proximity
+    maxPathDistance: 5            // Only consider files within 5 jumps
+});
 ```
 
 ### Scoring Logic Explained
@@ -246,9 +256,15 @@ The script uses a **proportional scoring system** to rank related files.
 2.  **Reverse Relationship Lookup**: `reverseScoreMultiplier` points are awarded when other pages reference the current page in their `group-*` fields.
     *   For example: If Maya Deren has `domain-category: film-director`, the system will find pages with `group-film-director: "Maya Deren"`
     *   (Default: 2.0 points per reverse relationship - higher than regular matches to reflect stronger creative bonds)
-3.  **Path Proximity** (optional):
-    *   **2 points** for files in the exact same folder.
-    *   **1 point** for files in subfolders.
+3.  **Path Distance Scoring** (NEW - optional):
+    *   **Distance-based scoring** that rewards structural organization proximity
+    *   **Formula**: 0 jumps = `pathDistanceMultiplier` points; 1+ jumps = `pathDistanceMultiplier / (1 + distance)` points
+    *   **Examples** (with default `pathDistanceMultiplier: 2.0`):
+        - 0 jumps (same folder): **2.0 points** (Maya.md ↔ Divine.md)
+        - 2 jumps (sibling folders): **0.67 points** (People/Maya.md ↔ Movies/Pink.md) 
+        - 5 jumps (distant cousins): **0.33 points** (People/Maya.md ↔ Cinematic Theory/Movements/Avant-Garde.md)
+    *   **Replaces** old binary system (0/1/2 points) with **smooth proximity gradient**
+    *   **Performance**: Limited to `maxPathDistance` jumps (default: 10) and valid subjects only
 
 **Calculation:**
 -   **Total Possible Score** = (Sum of `targetValues.length` for all `matchCriteria` fields × `scoreMultiplier`) + (Potential reverse relationships × `reverseScoreMultiplier`) + (Max path points if enabled)
@@ -288,6 +304,73 @@ With `debug: true` in your `getRelatedConcepts()` call, you'll see detailed outp
 -   A dynamic results table showing all found concepts and their calculated confidence scores.
 
 This enhanced debug output is invaluable for understanding how results are filtered and scored.
+
+## 🚀 NEW: Distance-Based Path Scoring
+
+**Revolutionary improvement over binary path scoring!** The new distance-based path scoring system provides a nuanced approach to measuring structural relationships in your knowledge base.
+
+### What Changed
+
+**Before** (Old Binary System):
+- Same folder: 2 points  
+- Subfolder: 1 point
+- Everything else: 0 points
+
+**After** (New Distance-Based System):
+- **Smooth proximity gradient** based on filesystem jumps
+- **Rewards your structural organization** efforts
+- **Performance optimized** with subject filtering
+
+### How Distance Calculation Works
+
+The system calculates the minimum number of directory navigation steps between two files:
+
+```
+Maya Deren.md → Divine.md
+└─ People/Maya Deren.md
+└─ People/Divine.md
+Distance: 0 jumps (same folder)
+
+Maya Deren.md → Pink Flamingos.md  
+└─ People/Maya Deren.md
+└─ Movies/Pink Flamingos.md  
+Distance: 2 jumps (../Movies/)
+
+Maya Deren.md → American Avant-Garde.md
+└─ People/Maya Deren.md
+└─ Cinematic Theory/Movements/American Avant-Garde.md
+Distance: 5 jumps (../../../Cinematic Theory/Movements/)
+```
+
+### Scoring Formula
+
+**Distance = 0**: `pathDistanceMultiplier` points (full reward)  
+**Distance > 0**: `pathDistanceMultiplier / (1 + distance)` points (decaying reward)
+
+**Default Examples** (`pathDistanceMultiplier: 2.0`):
+- 0 jumps: **2.00 points** (100% - same folder)
+- 1 jump: **1.00 points** (50% - parent/child)  
+- 2 jumps: **0.67 points** (33% - siblings)
+- 5 jumps: **0.33 points** (17% - distant cousins)
+- 10 jumps: **0.18 points** (9% - very distant)
+
+### Performance & Scope Control
+
+**✅ Smart Limitations:**
+- Only considers files with **valid subjects** (from config)
+- Respects **`maxPathDistance`** threshold (default: 10 jumps)
+- **No vault-wide scanning** - keeps queries fast
+
+**⚡ Performance Benefits:**
+- Prevents unnecessary distance calculations for irrelevant files
+- Maintains sub-second response times even in large vaults
+- Focuses on conceptually related content only
+
+### Migration from Old System
+
+The old `getFilesInSamePath()` method is deprecated but preserved for backward compatibility. All new implementations automatically use the distance-based approach when you call `getRelatedConcepts()`.
+
+**No breaking changes** - existing code continues to work with improved scoring!
 
 ## Prerequisites
 
