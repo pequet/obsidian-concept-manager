@@ -200,6 +200,7 @@ class ConceptManager {
         maxResults = 10, 
         strictMaxResults = false,
         scoreMultiplier = 1.5,
+        reverseScoreMultiplier = 2.5,
         debug = false 
     }) {
         const current = dv.current();
@@ -329,6 +330,8 @@ class ConceptManager {
             dv.paragraph(`  • minScore: ${minScore}`);
             dv.paragraph(`  • maxResults: ${maxResults}`);
             dv.paragraph(`  • strictMaxResults: ${strictMaxResults}`);
+            dv.paragraph(`  • scoreMultiplier: ${scoreMultiplier} (regular field matches)`);
+            dv.paragraph(`  • reverseScoreMultiplier: ${reverseScoreMultiplier} (reverse relationships)`);
             dv.paragraph(`**Current frontmatter values:**`);
             Object.keys(current).forEach(key => {
                 if (typeof current[key] !== 'function' && key !== 'file') {
@@ -509,6 +512,96 @@ class ConceptManager {
             stepCounter++;
         });
         
+        // REVERSE RELATIONSHIP LOOKUP: Find pages that reference the current page
+        if (current['domain-category']) {
+            const domainCategories = Array.isArray(current['domain-category']) ? current['domain-category'] : [current['domain-category']];
+            const currentPageName = current.file.name;
+            
+            if (debug) {
+                dv.paragraph(`**Step ${stepCounter}: Reverse relationship lookup**`);
+                dv.paragraph(`**Current page name:** "${currentPageName}"`);
+                dv.paragraph(`**Domain categories:** [${domainCategories.join(', ')}]`);
+            }
+            
+            domainCategories.forEach(category => {
+                const groupFieldName = `group-${category}`;
+                
+                // Validate that this group field is in config
+                const validation = this.isValidGroupField({ 
+                    groupFieldName: groupFieldName, 
+                    validFilters: config.validFilters
+                });
+                
+                if (!validation.isValid) {
+                    if (debug) {
+                        dv.paragraph(`⚠️ Skipping reverse lookup for invalid group field: ${validation.reason}`);
+                    }
+                    return;
+                }
+                
+                if (debug) {
+                    dv.paragraph(`**REVERSE LOOKUP QUERY:**`);
+                    dv.paragraph(`  • Looking for pages with field: "${groupFieldName}"`);
+                    dv.paragraph(`  • That contain value: "${currentPageName}"`);
+                    dv.paragraph(`  • Subject filter: [${config.validSubjects.join(', ')}] (from config)`);
+                }
+                
+                // Find pages that reference the current page in this group field
+                const reverseMatchingConcepts = dv.pages()
+                    .where(p => {
+                        // Filter by valid subjects
+                        if (!config.validSubjects.includes(p.subject)) return false;
+                        
+                        // Exclude current page
+                        if (p.file.path === current.file.path) return false;
+                        
+                        // Check if this page has the group field
+                        if (!p[groupFieldName]) return false;
+                        
+                        // Check if the field contains the current page name
+                        const fieldValue = p[groupFieldName];
+                        if (Array.isArray(fieldValue)) {
+                            return fieldValue.some(val => val && val.toString().includes(currentPageName));
+                        } else {
+                            return fieldValue && fieldValue.toString().includes(currentPageName);
+                        }
+                    });
+                
+                if (debug) {
+                    dv.paragraph(`**REVERSE LOOKUP RESULTS:**`);
+                    dv.paragraph(`  • Found ${reverseMatchingConcepts.length} files with reverse references`);
+                    if (reverseMatchingConcepts.length > 0) {
+                        dv.paragraph(`  • Matching pages:`);
+                        reverseMatchingConcepts.forEach(concept => {
+                            const fieldValue = concept[groupFieldName];
+                            const displayValue = Array.isArray(fieldValue) ? fieldValue.join(', ') : fieldValue;
+                            dv.paragraph(`    - ${concept.file.name}: ${groupFieldName}=[${displayValue}] (contains: ${currentPageName})`);
+                        });
+                    }
+                }
+                
+                // Add points for reverse relationships
+                reverseMatchingConcepts.forEach(concept => {
+                    const conceptId = concept.file.path;
+                    if (!relatedConcepts.has(conceptId)) {
+                        relatedConcepts.set(conceptId, { 
+                            concept, 
+                            scores: new Map([["path", 0]]) 
+                        });
+                    }
+                    
+                    const points = reverseScoreMultiplier; // Higher weight for direct creative relationships
+                    relatedConcepts.get(conceptId).scores.set(`${groupFieldName}-reverse`, points);
+                });
+            });
+            
+            if (debug) {
+                dv.paragraph("---");
+            }
+            
+            stepCounter++;
+        }
+        
         // Calculate final scores
         if (debug) {
             dv.paragraph(`**Step ${stepCounter}: Calculating final scores**`);
@@ -536,6 +629,21 @@ class ConceptManager {
                 }
             });
             
+            // Add potential reverse relationship points
+            if (current['domain-category']) {
+                const domainCategories = Array.isArray(current['domain-category']) ? current['domain-category'] : [current['domain-category']];
+                domainCategories.forEach(category => {
+                    const groupFieldName = `group-${category}`;
+                    const validation = this.isValidGroupField({ 
+                        groupFieldName: groupFieldName, 
+                        validFilters: config.validFilters
+                    });
+                    if (validation.isValid) {
+                        maxPossibleScore += reverseScoreMultiplier; // Add potential reverse relationship points
+                    }
+                });
+            }
+            
             const confidence = maxPossibleScore > 0 ? (totalScore / maxPossibleScore) * 100 : 0;
             
             if (debug) {
@@ -548,6 +656,10 @@ class ConceptManager {
                 scores.forEach((score, field) => {
                     if (field === "path") {
                         detailedBreakdown.push(`${field}=${score}${score > 0 ? ' (same folder)' : ''}`);
+                    } else if (field.endsWith('-reverse')) {
+                        // Show reverse relationship
+                        const baseField = field.replace('-reverse', '');
+                        detailedBreakdown.push(`${baseField}=${score} (reverse: contains "${current.file.name}")`);
                     } else {
                         // Show which values matched for this field
                         const conceptValue = concept[field];
@@ -630,7 +742,7 @@ class ConceptManager {
             currentPagePath: current.file.path,
             debug: debug
         });
-        
+
         if (debug) {
             dv.paragraph(`**Final Subject Filtering (Safety Check):**`);
             dv.paragraph(`  • Input concepts: ${subjectFiltering.debugInfo.inputCount}`);

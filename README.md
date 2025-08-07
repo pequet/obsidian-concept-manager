@@ -7,11 +7,12 @@ This is a CustomJS Class designed for **advanced content discovery** and **workf
 ## Features
 
 - Dynamic concept relationship mapping
+- **Bidirectional relationship discovery** (finds both similar concepts and works that reference the current concept)
 - Multi-dimensional classification (domain, category, level, unit)
 - Confidence-scored concept associations
 - Cross-note relationship visualization
 - Subject-specific filtering
-- Proportional scoring system
+- Dual-weighted proportional scoring system (regular vs. reverse relationships)
 
 ## The Game Changer: Centralized Wrapper Functions
 
@@ -190,13 +191,14 @@ Here are all available parameters for the `getRelatedConcepts()` method:
 const { ConceptManager } = customJS;
 ConceptManager.getRelatedConcepts({ 
     dv,
-    matchCriteria: {},        // Frontmatter fields to match (defaults to {subject: true, type: true, domain: true})
-    includePath: true,        // true (default), false (no path scoring), "strict" (same path only)
-    strictPath: false,        // Only return same-path files (default: false)
-    minScore: 0.66,           // Minimum confidence 0.0-1.0 (default: 66%)
-    maxResults: 10,           // Maximum results (default: 10)
-    scoreMultiplier: 1.5,     // Points per matching frontmatter value (default: 1.5)
-    debug: false              // Show detailed breakdown (default: false)
+    matchCriteria: {},             // Frontmatter fields to match (defaults to {subject: true, type: true, domain: true})
+    includePath: true,             // true (default), false (no path scoring), "strict" (same path only)
+    strictPath: false,             // Only return same-path files (default: false)
+    minScore: 0.66,                // Minimum confidence 0.0-1.0 (default: 66%)
+    maxResults: 10,                // Maximum results (default: 10)
+    scoreMultiplier: 1.5,          // Points per matching frontmatter value (default: 1.5)
+    reverseScoreMultiplier: 2.0,   // Points per reverse relationship (default: 2.0)
+    debug: false                   // Show detailed breakdown (default: false)
 });
 ```
 
@@ -241,18 +243,40 @@ The script uses a **proportional scoring system** to rank related files.
 
 1.  **Frontmatter Field Matching**: `scoreMultiplier` points are awarded for *each matching value* in a specified frontmatter field.
     *   (Default: 1.5 points per match)
-2.  **Path Proximity** (optional):
+2.  **Reverse Relationship Lookup**: `reverseScoreMultiplier` points are awarded when other pages reference the current page in their `group-*` fields.
+    *   For example: If Maya Deren has `domain-category: film-director`, the system will find pages with `group-film-director: "Maya Deren"`
+    *   (Default: 2.0 points per reverse relationship - higher than regular matches to reflect stronger creative bonds)
+3.  **Path Proximity** (optional):
     *   **2 points** for files in the exact same folder.
     *   **1 point** for files in subfolders.
 
 **Calculation:**
--   **Total Possible Score** = (Sum of `targetValues.length` for all `matchCriteria` fields × `scoreMultiplier`) + (Max path points if enabled)
+-   **Total Possible Score** = (Sum of `targetValues.length` for all `matchCriteria` fields × `scoreMultiplier`) + (Potential reverse relationships × `reverseScoreMultiplier`) + (Max path points if enabled)
 -   **Confidence** = `(Actual Score / Total Possible Score) × 100`
 
 **Understanding Proportional Scores:**
 
 -   The confidence score reflects the **degree of match** or **conceptual overlap** between the current file and related files. A score of 100% indicates a perfect match across all specified criteria.
 -   **Scores <100% are normal and expected** when searching for multiple values but frontmatter fields only contain single values. For example, searching for `subject: ["A", "B"]` with `subject` defined as a string will result in lower scores, even though it's a perfect match for the data it contains. The ranking is preserved but the ceiling is going to be lower than 100% for single-value fields.
+
+**Tuning Relationship Strength:**
+
+The system recognizes that different types of relationships have different strengths:
+
+-   **`scoreMultiplier`** (default: 1.5): For contextual similarity (e.g., two directors, two actors)
+-   **`reverseScoreMultiplier`** (default: 2.0): For direct creative relationships (e.g., director → their film)
+
+You can adjust these values to fine-tune how the system weighs different relationship types:
+
+```dataviewjs
+const { ConceptManager } = customJS;
+ConceptManager.getRelatedConcepts({ 
+    dv,
+    scoreMultiplier: 1.0,          // Lower weight for similarity
+    reverseScoreMultiplier: 3.0,   // Higher weight for direct relationships
+    debug: true 
+});
+```
 
 ### Debugging
 
