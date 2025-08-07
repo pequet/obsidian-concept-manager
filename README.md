@@ -7,7 +7,7 @@ This is a CustomJS Class designed for **advanced content discovery** and **workf
 ## Features
 
 - Dynamic concept relationship mapping
-- **Bidirectional relationship discovery** (finds both similar concepts and works that reference the current concept)
+- Bidirectional relationship discovery (finds both similar concepts and others that reference the current concept)
 - Multi-dimensional classification (domain, category, level, unit)
 - Confidence-scored concept associations
 - Cross-note relationship visualization
@@ -197,7 +197,7 @@ ConceptManager.getRelatedConcepts({
     minScore: 0.66,                // Minimum confidence 0.0-1.0 (default: 66%)
     maxResults: 10,                // Maximum results (default: 10)
     scoreMultiplier: 1.5,          // Points per matching frontmatter value (default: 1.5)
-    reverseScoreMultiplier: 2.0,   // Points per reverse relationship (default: 2.0)
+    reverseScoreMultiplier: 2.5,   // Points per reverse relationship (default: 2.5)
     debug: false                   // Show detailed breakdown (default: false)
 });
 ```
