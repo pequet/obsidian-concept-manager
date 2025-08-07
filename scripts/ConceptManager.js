@@ -204,6 +204,32 @@ class ConceptManager {
     }) {
         const current = dv.current();
         
+        // Get config validation for the current page's subject
+        const config = this.getConfigForSubject({ 
+            dv, 
+            subject: current.subject, 
+            debug: debug 
+        });
+        
+        if (debug) {
+            dv.paragraph(`**🔧 Config Lookup for Subject: "${config.debugInfo.subject}"**`);
+            if (config.debugInfo.configPagesFound === 1) {
+                dv.paragraph(`✅ Found Config: ${config.debugInfo.configPageName}`);
+                dv.paragraph(`  • valid_filters: [${config.debugInfo.validFilters.join(', ')}]`);
+                dv.paragraph(`  • valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+            } else if (config.debugInfo.configPagesFound > 1) {
+                dv.paragraph(`⚠️ Warning: Found ${config.debugInfo.configPagesFound} config pages - using first: ${config.debugInfo.configPageName}`);
+                dv.paragraph(`  • All matches: [${config.debugInfo.allConfigMatches.join(', ')}]`);
+                dv.paragraph(`  • valid_filters: [${config.debugInfo.validFilters.join(', ')}]`);
+                dv.paragraph(`  • valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+            } else {
+                dv.paragraph(`❌ No Config page found for subject "${config.debugInfo.subject}"`);
+                dv.paragraph(`  • Using default valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+                dv.paragraph(`  • No valid_filters available`);
+            }
+            dv.paragraph("---");
+        }
+        
         // Handle includePath modes
         if (includePath === "strict") {
             strictPath = true;
@@ -219,9 +245,44 @@ class ConceptManager {
             };
         }
         
+        // Validate and filter matchCriteria to only include valid group fields
+        if (config.validFilters.length > 0) {
+            const validatedCriteria = {};
+            Object.keys(matchCriteria).forEach(field => {
+                if (field.startsWith('group-')) {
+                    // Check if this group field is valid according to config
+                    const validation = this.isValidGroupField({ 
+                        groupFieldName: field, 
+                        validFilters: config.validFilters
+                    });
+                    if (validation.isValid) {
+                        validatedCriteria[field] = matchCriteria[field];
+                    } else if (debug) {
+                        dv.paragraph(`⚠️ Ignoring invalid group field: ${validation.reason}`);
+                    }
+                } else {
+                    // Non-group fields are always included
+                    validatedCriteria[field] = matchCriteria[field];
+                }
+            });
+            matchCriteria = validatedCriteria;
+            
+            if (debug) {
+                dv.paragraph(`**Group Field Validation Results:**`);
+                const originalFields = Object.keys(validatedCriteria).length > 0 ? Object.keys(validatedCriteria).join(', ') : 'none';
+                const groupFields = Object.keys(validatedCriteria).filter(f => f.startsWith('group-')).join(', ') || 'none';
+                dv.paragraph(`  • Valid criteria fields after filtering: ${originalFields}`);
+                dv.paragraph(`  • Valid group fields: ${groupFields}`);
+                dv.paragraph("---");
+            }
+        }
+        
         // Process matchCriteria to get actual values to match on
         const resolvedCriteria = {};
         const searchFilters = {};
+        
+        // ALWAYS filter by valid subjects from config
+        searchFilters['subject'] = config.validSubjects;
         
         Object.keys(matchCriteria).forEach(field => {
             const criteriaValue = matchCriteria[field];
@@ -229,7 +290,23 @@ class ConceptManager {
             if (criteriaValue === null || criteriaValue === false) {
                 // Ignore this field
                 return;
-            } else if (criteriaValue === true) {
+            }
+            
+            // Skip group-* fields that aren't in config valid_filters
+            if (field.startsWith('group-')) {
+                const validation = this.isValidGroupField({ 
+                    groupFieldName: field, 
+                    validFilters: config.validFilters
+                });
+                if (!validation.isValid) {
+                    if (debug) {
+                        dv.paragraph(`⚠️ Skipping invalid group field: ${validation.reason}`);
+                    }
+                    return;
+                }
+            }
+            
+            if (criteriaValue === true) {
                 // Use current page's value
                 resolvedCriteria[field] = current[field];
             } else {
@@ -237,8 +314,8 @@ class ConceptManager {
                 resolvedCriteria[field] = criteriaValue;
             }
             
-            // Set up search filters (for domain limiting if specified)
-            if (field === 'subject' || field === 'domain') {
+            // Set up domain filter if specified
+            if (field === 'domain') {
                 searchFilters[field] = resolvedCriteria[field];
             }
         });
@@ -258,11 +335,17 @@ class ConceptManager {
                     dv.paragraph(`  • ${key}: ${Array.isArray(current[key]) ? current[key].join(', ') : current[key]}`);
                 }
             });
-            dv.paragraph(`**Match criteria resolved:**`);
+            dv.paragraph(`**Final resolved criteria (after validation):**`);
             Object.keys(resolvedCriteria).forEach(field => {
                 const value = resolvedCriteria[field];
                 const displayValue = Array.isArray(value) ? value.join(', ') : (value || 'undefined');
                 dv.paragraph(`  • ${field}: ${displayValue}`);
+            });
+            dv.paragraph(`**Search filters applied to ALL queries:**`);
+            Object.keys(searchFilters).forEach(filter => {
+                const value = searchFilters[filter];
+                const displayValue = Array.isArray(value) ? value.join(', ') : (value || 'undefined');
+                dv.paragraph(`  • ${filter}: [${displayValue}]`);
             });
             dv.paragraph("---");
         }
@@ -334,13 +417,31 @@ class ConceptManager {
             
             if (debug) {
                 dv.paragraph(`**Step ${stepCounter}: Checking frontmatter field '${field}'**`);
-                dv.paragraph(`Target value(s) for '${field}': ${targetValues.join(', ')}`);
-                dv.paragraph(`Looking for files that match these values...`);
+                dv.paragraph(`**EXACT QUERY BEING RUN:**`);
+                dv.paragraph(`  • Field: "${field}"`);
+                dv.paragraph(`  • Target value(s): [${targetValues.join(', ')}]`);
+                if (searchFilters.subject) {
+                    const searchSubjects = Array.isArray(searchFilters.subject) ? searchFilters.subject : [searchFilters.subject];
+                    dv.paragraph(`  • Subject filter: [${searchSubjects.join(', ')}] (from config valid_subjects)`);
+                } else {
+                    dv.paragraph(`  • Subject filter: none`);
+                }
+                if (searchFilters.domain) {
+                    const searchDomains = Array.isArray(searchFilters.domain) ? searchFilters.domain : [searchFilters.domain];
+                    dv.paragraph(`  • Domain filter: [${searchDomains.join(', ')}] (current page's domain)`);
+                } else {
+                    dv.paragraph(`  • Domain filter: none`);
+                }
+                dv.paragraph(`  • Exclude current page: ${current.file.name}`);
+                dv.paragraph(`  • Query: Find pages where ${field} contains ANY of [${targetValues.join(', ')}] AND subject in valid_subjects AND NOT current page`);
             }
             
             // Find all files that match this criteria
             const matchingConcepts = dv.pages()
                 .where(p => {
+                    // Exclude current page
+                    if (p.file.path === current.file.path) return false;
+                    
                     // Apply subject filter if it's in searchFilters (handle arrays properly)
                     if (searchFilters.subject) {
                         const searchSubjects = Array.isArray(searchFilters.subject) ? searchFilters.subject : [searchFilters.subject];
@@ -362,14 +463,24 @@ class ConceptManager {
             });
             
             if (debug) {
-                dv.paragraph(`Found ${matchingConcepts.length} files matching '${field}' criteria.`);
-                // TMI: Uncomment to see the matching values and their scores   
-                // if (matchingConcepts.length > 0) {
-                //     matchingConcepts.forEach(c => {
-                //         const pageValues = Array.isArray(c[field]) ? c[field] : [c[field]];
-                //         dv.paragraph(`  • ${c.file.name}: ${field} = ${pageValues.join(', ')}`);
-                //     });
-                // }
+                dv.paragraph(`**QUERY RESULTS:**`);
+                dv.paragraph(`  • Found ${matchingConcepts.length} files matching '${field}' criteria`);
+                if (matchingConcepts.length > 0 && matchingConcepts.length <= 10) {
+                    dv.paragraph(`  • Matching pages:`);
+                    matchingConcepts.forEach(c => {
+                        const pageValues = Array.isArray(c[field]) ? c[field] : [c[field]];
+                        const matchingValues = targetValues.filter(v => pageValues.includes(v));
+                        dv.paragraph(`    - ${c.file.name}: ${field}=[${pageValues.join(', ')}] (matches: [${matchingValues.join(', ')}])`);
+                    });
+                } else if (matchingConcepts.length > 10) {
+                    dv.paragraph(`  • Too many matches to list (${matchingConcepts.length} pages)`);
+                    dv.paragraph(`  • Sample of first 3:`);
+                    Array.from(matchingConcepts).slice(0, 3).forEach(c => {
+                        const pageValues = Array.isArray(c[field]) ? c[field] : [c[field]];
+                        const matchingValues = targetValues.filter(v => pageValues.includes(v));
+                        dv.paragraph(`    - ${c.file.name}: ${field}=[${pageValues.join(', ')}] (matches: [${matchingValues.join(', ')}])`);
+                    });
+                }
             }
     
             // Add scores for each matching concept
@@ -431,11 +542,32 @@ class ConceptManager {
                 const scoreBreakdown = Array.from(scores.entries())
                     .map(([key, score]) => `${key}=${score}`)
                     .join(', ');
+                    
+                // Build detailed breakdown showing which fields matched
+                let detailedBreakdown = [];
+                scores.forEach((score, field) => {
+                    if (field === "path") {
+                        detailedBreakdown.push(`${field}=${score}${score > 0 ? ' (same folder)' : ''}`);
+                    } else {
+                        // Show which values matched for this field
+                        const conceptValue = concept[field];
+                        const targetValue = resolvedCriteria[field];
+                        if (conceptValue && targetValue) {
+                            const conceptValues = Array.isArray(conceptValue) ? conceptValue : [conceptValue];
+                            const targetValues = Array.isArray(targetValue) ? targetValue : [targetValue];
+                            const matches = targetValues.filter(v => conceptValues.includes(v));
+                            detailedBreakdown.push(`${field}=${score} (matches: [${matches.join(', ')}])`);
+                        } else {
+                            detailedBreakdown.push(`${field}=${score}`);
+                        }
+                    }
+                });
+                
                 if (confidence >= minScore * 100) {
-                    dv.paragraph(`✓ ${concept.file.name}: ${scoreBreakdown}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
+                    dv.paragraph(`✓ ${concept.file.name}: ${detailedBreakdown.join(', ')}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
                 } else {
-                    // TMI: Uncomment to see the score breakdown
-                    // dv.paragraph(`✗ ${concept.file.name}: ${scoreBreakdown}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
+                    // Show failed matches too for debugging
+                    dv.paragraph(`✗ ${concept.file.name}: ${detailedBreakdown.join(', ')}, total=${totalScore}/${maxPossibleScore} = ${confidence.toFixed(2)}%`);
                 }
             }
             
@@ -490,6 +622,36 @@ class ConceptManager {
                 }
             }
         }
+        
+        // Apply subject validation using config
+        const subjectFiltering = this.filterPagesByValidSubjects({
+            pages: filtered.map(r => r.concept),
+            validSubjects: config.validSubjects,
+            currentPagePath: current.file.path,
+            debug: debug
+        });
+        
+        if (debug) {
+            dv.paragraph(`**Final Subject Filtering (Safety Check):**`);
+            dv.paragraph(`  • Input concepts: ${subjectFiltering.debugInfo.inputCount}`);
+            dv.paragraph(`  • Valid subjects: [${subjectFiltering.debugInfo.validSubjects.join(', ')}]`);
+            dv.paragraph(`  • Concepts after final filtering: ${subjectFiltering.debugInfo.filteredCount}`);
+            if (subjectFiltering.debugInfo.inputCount === subjectFiltering.debugInfo.filteredCount) {
+                dv.paragraph(`  • ✅ No additional filtering needed (queries already filtered by valid subjects)`);
+            } else {
+                dv.paragraph(`  • ⚠️ Additional filtering applied: ${subjectFiltering.debugInfo.inputCount - subjectFiltering.debugInfo.filteredCount} concepts removed`);
+            }
+            if (subjectFiltering.debugInfo.excludedCurrentPage) {
+                dv.paragraph(`  • Current page already excluded in queries: ${subjectFiltering.debugInfo.currentPagePath}`);
+            }
+        }
+        
+        // Rebuild the filtered results with only valid subjects
+        const finalResults = filtered.filter(result => 
+            subjectFiltering.filtered.some(validPage => 
+                validPage.file.path === result.concept.file.path
+            )
+        );
             
         if (debug) {
             // Debug: Show what's in resolvedCriteria
@@ -547,10 +709,11 @@ class ConceptManager {
                 `strict maxResults=${maxResults}` : 
                 `maxResults=${maxResults} (non-strict, included ${filtered.length > maxResults ? filtered.length - maxResults : 0} additional results with same confidence)`;
             dv.paragraph(`**Filtered Results: ${filtered.length} concepts (after minScore=${(minScore * 100).toFixed(1)}%, ${filterDescription})**`);
+            dv.paragraph(`**Final Results: ${finalResults.length} concepts (after subject validation with validSubjects=[${subjectFiltering.debugInfo.validSubjects.join(', ')}])**`);
             dv.paragraph("---");
         }
         
-        return filtered;
+        return finalResults;
     }
 
     /**
@@ -566,6 +729,124 @@ class ConceptManager {
             return values.flat(Infinity).map(v => String(v));
         }
         return [String(values)]; // Convert to string and then to array with single item
+    }
+
+    /**
+     * Utility method to get configuration and validation settings for a given subject
+     * Centralizes the logic for finding config pages and extracting valid filters/subjects
+     * 
+     * @param {Object} params - Parameters object
+     * @param {Object} params.dv - The dataview API object
+     * @param {string} params.subject - The subject to find config for
+     * @param {boolean} [params.debug=false] - Show debug output
+     * @returns {Object} Configuration object with validFilters, validSubjects, and configPage
+     * 
+     * @example
+     * const config = this.getConfigForSubject({ dv, subject: "Sample Project", debug: true });
+     * // Returns: { validFilters: [...], validSubjects: [...], configPage: {...} }
+     */
+    getConfigForSubject({ dv, subject, debug = false }) {
+        // Find config page with matching subject
+        const configPages = dv.pages()
+            .where(p => 
+                p.type === "config" && 
+                p.subject === subject
+            );
+            
+        const configPage = configPages.length > 0 ? configPages[0] : null;
+        
+        // Extract valid filters and subjects from config
+        let validFilters = configPage ? (configPage.valid_filters || []) : [];
+        let validSubjects = configPage ? (configPage.valid_subjects || []) : [];
+        
+        // If no valid subjects found, default to current subject
+        if (!validSubjects.length) {
+            validSubjects = [subject];
+        }
+        
+        const debugInfo = {
+            subject,
+            configPagesFound: configPages.length,
+            configPageName: configPage ? configPage.file.name : null,
+            allConfigMatches: configPages.map(p => p.file.name),
+            validFilters,
+            validSubjects,
+            hasConfig: !!configPage
+        };
+        
+        return {
+            validFilters,
+            validSubjects,
+            configPage,
+            hasConfig: !!configPage,
+            debugInfo
+        };
+    }
+
+    /**
+     * Utility method to validate if a group field name is allowed according to config
+     * 
+     * @param {Object} params - Parameters object
+     * @param {string} params.groupFieldName - The group field name to validate (e.g., "group-release-year")
+     * @param {Array} params.validFilters - Array of valid filter names from config (clean names like "release-year")
+     * @param {boolean} [params.debug=false] - Show debug output
+     * @returns {boolean} True if the group field is valid
+     * 
+     * @example
+     * const isValid = this.isValidGroupField({ 
+     *   groupFieldName: "group-release-year", 
+     *   validFilters: ["release-year", "film-director"], 
+     *   debug: true 
+     * });
+     */
+    isValidGroupField({ groupFieldName, validFilters, debug = false }) {
+        if (!groupFieldName.startsWith('group-')) {
+            return { isValid: false, reason: `"${groupFieldName}" is not a group field (doesn't start with 'group-')` };
+        }
+        
+        // Strip "group-" prefix and compare against clean validFilters
+        const filterName = groupFieldName.replace('group-', '');
+        const isValid = validFilters.includes(filterName);
+        
+        return { 
+            isValid, 
+            filterName,
+            reason: isValid ? 
+                `"${groupFieldName}" is valid ("${filterName}" found in valid_filters)` : 
+                `"${groupFieldName}" is invalid ("${filterName}" not in valid_filters: [${validFilters.join(', ')}])`
+        };
+    }
+
+    /**
+     * Utility method to filter pages by valid subjects
+     * 
+     * @param {Object} params - Parameters object
+     * @param {Array} params.pages - Array of pages to filter
+     * @param {Array} params.validSubjects - Array of valid subject values
+     * @param {string} [params.currentPagePath] - Current page path to exclude from results
+     * @param {boolean} [params.debug=false] - Show debug output
+     * @returns {Array} Filtered array of pages
+     */
+    filterPagesByValidSubjects({ pages, validSubjects, currentPagePath = null, debug = false }) {
+        const filtered = pages.filter(page => {
+            // Exclude current page if specified
+            if (currentPagePath && page.file.path === currentPagePath) {
+                return false;
+            }
+            
+            // Check if page subject is in valid subjects
+            return validSubjects.includes(page.subject);
+        });
+        
+        const debugInfo = {
+            inputCount: pages.length,
+            validSubjects,
+            filteredCount: filtered.length,
+            excludedCurrentPage: currentPagePath ? true : false,
+            currentPagePath
+        };
+        
+        return { filtered, debugInfo };
     }
 
     /**
@@ -691,7 +972,25 @@ class ConceptManager {
         try {
             const currentPage = dv.current();
             
+            // Get config validation for the current page's subject
+            const config = this.getConfigForSubject({ 
+                dv, 
+                subject: currentPage.subject, 
+                debug: debug 
+            });
+            
             if (debug) {
+                dv.paragraph(`**🔧 Config Lookup for generateViewTable: "${config.debugInfo.subject}"**`);
+                if (config.debugInfo.hasConfig) {
+                    dv.paragraph(`✅ Found Config: ${config.debugInfo.configPageName}`);
+                    dv.paragraph(`  • valid_filters: [${config.debugInfo.validFilters.join(', ')}]`);
+                    dv.paragraph(`  • valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+                } else {
+                    dv.paragraph(`❌ No Config page found for subject "${config.debugInfo.subject}"`);
+                    dv.paragraph(`  • Using default valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+                }
+                dv.paragraph("---");
+                
                 dv.header(3, "🐛 DEBUG: ConceptManager.generateViewTable()");
                 dv.paragraph(`**Current file:** ${currentPage.file.path}`);
                 
@@ -762,7 +1061,7 @@ class ConceptManager {
                 }
 
                 // Get related pages - match any page that has at least one matching domain category
-                const pages = dv.pages()
+                const allPages = dv.pages()
                     .where(p => {
                         if (!p["domain-category"]) return false;
                         
@@ -770,6 +1069,23 @@ class ConceptManager {
                         return pageCats.some(cat => domainCategoryKeys.includes(cat)) && 
                             p.type !== "hub"; // Exclude hub pages
                     });
+                    
+                // Apply subject validation
+                const pageFiltering = this.filterPagesByValidSubjects({
+                    pages: Array.from(allPages),
+                    validSubjects: config.validSubjects,
+                    currentPagePath: currentPage.file.path,
+                    debug: debug
+                });
+                
+                const pages = pageFiltering.filtered;
+                
+                if (debug) {
+                    dv.paragraph(`**Subject Filtering for Hub Pages:**`);
+                    dv.paragraph(`  • Before filtering: ${pageFiltering.debugInfo.inputCount} pages`);
+                    dv.paragraph(`  • After filtering: ${pageFiltering.debugInfo.filteredCount} pages`);
+                    dv.paragraph(`  • Valid subjects: [${pageFiltering.debugInfo.validSubjects.join(', ')}]`);
+                }
 
                 if (debug) {
                     dv.paragraph(`Found ${pages.length} non-Hub pages with matching domain-category`);
@@ -913,7 +1229,7 @@ class ConceptManager {
                     }
                     
                     // Find other Groups (Concepts/Core Patterns) in ALL matching Hubs
-                    const relatedGroups = dv.pages()
+                    const allRelatedGroups = dv.pages()
                         .where(p => {
                             if (!p["domain-category"] || p.file.path === currentPage.file.path || p.type === "hub") return false;
                             
@@ -924,8 +1240,24 @@ class ConceptManager {
                                 const hubCats = this.normalizeValues(hub["domain-category"]);
                                 return pageCats.some(cat => hubCats.includes(cat));
                             });
-                        })
-                        .sort(p => p.file.name);
+                        });
+                        
+                    // Apply subject validation
+                    const groupFiltering = this.filterPagesByValidSubjects({
+                        pages: Array.from(allRelatedGroups),
+                        validSubjects: config.validSubjects,
+                        currentPagePath: currentPage.file.path,
+                        debug: debug
+                    });
+                    
+                    const relatedGroups = groupFiltering.filtered.sort(p => p.file.name);
+                    
+                    if (debug) {
+                        dv.paragraph(`**Subject Filtering for Related Groups:**`);
+                        dv.paragraph(`  • Before filtering: ${groupFiltering.debugInfo.inputCount} groups`);
+                        dv.paragraph(`  • After filtering: ${groupFiltering.debugInfo.filteredCount} groups`);
+                        dv.paragraph(`  • Valid subjects: [${groupFiltering.debugInfo.validSubjects.join(', ')}]`);
+                    }
                         
                     if (debug) {
                         dv.paragraph(`**Step 3: Finding related Groups (Concepts/Core Patterns) in ALL matching Hubs**`);
@@ -1050,7 +1382,25 @@ class ConceptManager {
         try {
             const currentPage = dv.current();
             
+            // Get config validation for the current page's subject
+            const config = this.getConfigForSubject({ 
+                dv, 
+                subject: currentPage.subject, 
+                debug: debug 
+            });
+            
             if (debug) {
+                dv.paragraph(`**🔧 Config Lookup for generateGroupItemsList: "${config.debugInfo.subject}"**`);
+                if (config.debugInfo.hasConfig) {
+                    dv.paragraph(`✅ Found Config: ${config.debugInfo.configPageName}`);
+                    dv.paragraph(`  • valid_filters: [${config.debugInfo.validFilters.join(', ')}]`);
+                    dv.paragraph(`  • valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+                } else {
+                    dv.paragraph(`❌ No Config page found for subject "${config.debugInfo.subject}"`);
+                    dv.paragraph(`  • Using default valid_subjects: [${config.debugInfo.validSubjects.join(', ')}]`);
+                }
+                dv.paragraph("---");
+                
                 dv.header(3, "🐛 DEBUG: ConceptManager.generateGroupItemsList()");
                 dv.paragraph(`**Current file:** ${currentPage.file.path}`);
                 
@@ -1081,6 +1431,27 @@ class ConceptManager {
             let groupTypes = groupType ? 
                 (Array.isArray(groupType) ? groupType : [groupType]) : 
                 this.normalizeValues(currentPage["domain-category"]);
+                
+            // Validate group types against config valid filters
+            if (config.validFilters.length > 0) {
+                const validatedGroupTypes = groupTypes.filter(type => {
+                    // Compare domain-category value directly against clean validFilters
+                    const isValid = config.validFilters.includes(type);
+                    if (debug && !isValid) {
+                        dv.paragraph(`⚠️ Ignoring invalid group type: "${type}" (not in config valid_filters: [${config.validFilters.join(', ')}])`);
+                    }
+                    return isValid;
+                });
+                
+                if (debug) {
+                    dv.paragraph(`**Group Type Validation:**`);
+                    dv.paragraph(`  • Original types: [${groupTypes.join(', ')}]`);
+                    dv.paragraph(`  • Valid types after filtering: [${validatedGroupTypes.join(', ')}]`);
+                    dv.paragraph(`  • Config valid_filters: [${config.validFilters.join(', ')}]`);
+                }
+                
+                groupTypes = validatedGroupTypes;
+            }
             
             if (debug) {
                 dv.paragraph(`**Step 1: Determining Group (Concept/Core Pattern) types**`);
@@ -1141,7 +1512,7 @@ class ConceptManager {
                 }
                 
                 // Find all pages with matching group value
-                const matchingPages = dv.pages()
+                const allMatchingPages = dv.pages()
                     .where(p => {
                         if (!p[groupFieldName]) return false;
                         
@@ -1152,8 +1523,24 @@ class ConceptManager {
                         return pageValues.some(val => 
                             String(val).toLowerCase() === String(groupValue).toLowerCase()
                         );
-                    })
-                    .sort(p => p.file.name);
+                    });
+                    
+                // Apply subject validation
+                const pageMatching = this.filterPagesByValidSubjects({
+                    pages: Array.from(allMatchingPages),
+                    validSubjects: config.validSubjects,
+                    currentPagePath: currentPage.file.path,
+                    debug: debug
+                });
+                
+                const matchingPages = pageMatching.filtered.sort(p => p.file.name);
+                
+                if (debug) {
+                    dv.paragraph(`**Subject Filtering for Group Items:**`);
+                    dv.paragraph(`  • Before filtering: ${pageMatching.debugInfo.inputCount} pages`);
+                    dv.paragraph(`  • After filtering: ${pageMatching.debugInfo.filteredCount} pages`);
+                    dv.paragraph(`  • Valid subjects: [${pageMatching.debugInfo.validSubjects.join(', ')}]`);
+                }
                 
                 if (debug) {
                     dv.paragraph(`**SEARCH RESULTS:**`);
@@ -1327,6 +1714,7 @@ class ConceptManager {
                 
                 // Filter them to only include valid ones from config
                 relationTypes = allGroupFields.filter(key => {
+                    // Strip "group-" prefix and compare against clean validFilters
                     const filterName = key.replace('group-', '');
                     return validFilters.includes(filterName);
                 });
@@ -1335,6 +1723,7 @@ class ConceptManager {
                     dv.paragraph(`Filtered by valid_filters: [${relationTypes.join(', ')}]`);
                     if (relationTypes.length < allGroupFields.length) {
                         const filtered = allGroupFields.filter(key => {
+                            // Strip "group-" prefix and compare against clean validFilters
                             const filterName = key.replace('group-', '');
                             return !validFilters.includes(filterName);
                         });
@@ -1518,24 +1907,39 @@ class ConceptManager {
                 dv.paragraph(`Subject filter: ${currentSubject}`);
             }
             
-            // Note: This uses the existing getRelatedConcepts method but with a different parameter structure
-            // We need to convert the group-* fields to a matchCriteria format
+            // Build match criteria from current page's group-* fields and domain-category
             const matchCriteria = {};
+            
+            // Include domain-category if present
+            if (currentPage["domain-category"]) {
+                matchCriteria["domain-category"] = true;
+            }
+            
+            // Convert clean relation types to group-* field names and include if present
             relationTypes.forEach(type => {
-                const values = currentPage[type];
+                const groupFieldName = `group-${type}`;
+                const values = currentPage[groupFieldName];
                 if (values) {
-                    matchCriteria[type] = true; // Use current page's value
+                    matchCriteria[groupFieldName] = true; // Use current page's value
                 }
             });
             
             if (debug) {
-                dv.paragraph(`Match criteria for getRelatedConcepts: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
+                dv.paragraph(`**Building Match Criteria for getRelatedConcepts:**`);
+                dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? 'included' : 'not present'}`);
+                dv.paragraph(`  • group-* fields from current page:`);
+                relationTypes.forEach(type => {
+                    const groupFieldName = `group-${type}`;
+                    const values = currentPage[groupFieldName];
+                    dv.paragraph(`    - ${groupFieldName}: ${values ? `"${Array.isArray(values) ? values.join(', ') : values}"` : 'not present'}`);
+                });
+                dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
             }
             
             const related = this.getRelatedConcepts({ 
                 dv, 
                 matchCriteria,
-                debug: false // Don't double-debug
+                debug: debug
             });
 
             // Filter results to include only concepts with subjects in validSubjects
@@ -1656,18 +2060,22 @@ class ConceptManager {
                 dv.paragraph(`Searching for config with subject: ${currentPage.subject}`);
             }
 
-            // Get config for relation types
-            const config = dv.pages()
-                .where(p => p.type === "config" &&
-                        p.domain === "methods" &&
-                        p.subject === currentPage.subject)[0];
+            // Get config validation for the current page's subject
+            const configData = this.getConfigForSubject({ 
+                dv, 
+                subject: currentPage.subject, 
+                debug: debug 
+            });
             
             if (debug) {
-                if (config) {
-                    dv.paragraph(`✅ Found config: ${config.file.name}`);
-                    dv.paragraph(`Config valid_filters: ${config.valid_filters ? config.valid_filters.join(', ') : "undefined"}`);
+                dv.paragraph(`**🔧 Config Lookup for generateSmartView: "${configData.debugInfo.subject}"**`);
+                if (configData.debugInfo.hasConfig) {
+                    dv.paragraph(`✅ Found Config: ${configData.debugInfo.configPageName}`);
+                    dv.paragraph(`  • valid_filters: [${configData.debugInfo.validFilters.join(', ')}]`);
+                    dv.paragraph(`  • valid_subjects: [${configData.debugInfo.validSubjects.join(', ')}]`);
                 } else {
-                    dv.paragraph(`❌ No config found for subject: ${currentPage.subject}`);
+                    dv.paragraph(`❌ No Config page found for subject "${configData.debugInfo.subject}"`);
+                    dv.paragraph(`  • Using default valid_subjects: [${configData.debugInfo.validSubjects.join(', ')}]`);
                 }
                 dv.paragraph("---");
             }
@@ -1696,7 +2104,7 @@ class ConceptManager {
                 }
 
                 // Get relation types from config
-                const relationTypes = config?.valid_filters || [];
+                const relationTypes = configData.validFilters || [];
                 
                 if (debug) {
                     dv.paragraph(`Relation types to use: ${relationTypes.length > 0 ? relationTypes.join(', ') : "none (will use defaults)"}`);
