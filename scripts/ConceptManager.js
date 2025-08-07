@@ -2164,7 +2164,7 @@ class ConceptManager {
                     }
                 }
 
-                const currentValues = currentPage[type] || [];
+                const currentValues = currentPage["group-" + type] || [];
                 // Ensure currentValues is an array
                 const normalizedValues = Array.isArray(currentValues) ? currentValues : [currentValues];
                 
