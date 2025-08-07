@@ -295,6 +295,8 @@ class ConceptManager {
         includePath = true, 
         strictPath = false, 
         minScore = 0.66, 
+        minResults = 5,
+        strictMinResults = true,
         maxResults = 10, 
         strictMaxResults = false,
         scoreMultiplier = 1.5,
