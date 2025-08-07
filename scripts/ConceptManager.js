@@ -832,13 +832,37 @@ class ConceptManager {
             dv.paragraph(`Minimum confidence: ${(minScore * 100).toFixed(1)}%`);
             dv.paragraph(`Max results: ${maxResults}`);
             dv.paragraph(`Strict max results: ${strictMaxResults}`);
+            dv.paragraph(`Min results: ${minResults}`);
+            dv.paragraph(`Strict min results: ${strictMinResults}`);
         }
         
         // Apply filtering and sorting
-        const sortedResults = results
+        // Pre-filter for path and sort by confidence
+        const preSortedResults = results
             .filter(r => !strictPath || r.inSamePath) // Only include same-path files if strictPath is true
-            .sort((a, b) => b.confidence - a.confidence)
-            .filter(r => r.confidence >= minScore * 100); // Apply minimum score threshold
+            .sort((a, b) => b.confidence - a.confidence);
+        
+        // Calculate adaptive minScore if needed
+        let adaptiveMinScore = minScore;
+        if (strictMinResults) {
+            // Check how many results we'd get with current minScore
+            const currentResults = preSortedResults.filter(r => r.confidence >= minScore * 100);
+            
+            if (currentResults.length < minResults && preSortedResults.length >= minResults) {
+                // We need to lower the threshold
+                // Find the score that would give us at least minResults
+                const targetScore = preSortedResults[minResults - 1].confidence;
+                // Don't go below 10% minimum
+                adaptiveMinScore = Math.max(0.1, targetScore / 100);
+                
+                if (debug) {
+                    dv.paragraph(`**Adaptive MinScore:** Lowered from ${(minScore * 100).toFixed(1)}% to ${(adaptiveMinScore * 100).toFixed(1)}% to reach minResults=${minResults}`);
+                }
+            }
+        }
+        
+        // Apply the (possibly adapted) minimum score threshold
+        const sortedResults = preSortedResults.filter(r => r.confidence >= adaptiveMinScore * 100);
         
         // Apply max results limit with optional strict mode
         let filtered;
@@ -973,7 +997,7 @@ class ConceptManager {
             const filterDescription = strictMaxResults ? 
                 `strict maxResults=${maxResults}` : 
                 `maxResults=${maxResults} (non-strict, included ${filtered.length > maxResults ? filtered.length - maxResults : 0} additional results with same confidence)`;
-            dv.paragraph(`**Filtered Results: ${filtered.length} concepts (after minScore=${(minScore * 100).toFixed(1)}%, ${filterDescription})**`);
+            dv.paragraph(`**Filtered Results: ${filtered.length} concepts (after minScore=${(adaptiveMinScore * 100).toFixed(1)}%, ${filterDescription})**`);
             dv.paragraph(`**Final Results: ${finalResults.length} concepts (after subject validation with validSubjects=[${subjectFiltering.debugInfo.validSubjects.join(', ')}])**`);
             dv.paragraph("---");
         }

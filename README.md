@@ -196,11 +196,14 @@ ConceptManager.getRelatedConcepts({
     includePath: true,             // true (default), false (no path scoring), "strict" (same path only)
     strictPath: false,             // Only return same-path files (default: false)
     minScore: 0.66,                // Minimum confidence 0.0-1.0 (default: 66%)
+    minResults: 5,                 // Minimum results to return (default: 5)
+    strictMinResults: true,       // Apply min results limit strictly (default: true)
     maxResults: 10,                // Maximum results (default: 10)
+    strictMaxResults: false,       // Apply max results limit strictly (default: false)
     scoreMultiplier: 1.5,          // Points per matching frontmatter value (default: 1.5)
     reverseScoreMultiplier: 2.5,   // Points per reverse relationship (default: 2.5)
     pathDistanceMultiplier: 2.0,   // Base points for path distance scoring (default: 2.0)
-    maxPathDistance: 10,           // Maximum filesystem distance to consider (default: 10)
+    maxPathDistance: 5,           // Maximum filesystem distance to consider (default: 5)
     debug: false                   // Show detailed breakdown (default: false)
 });
 ```
@@ -294,6 +297,39 @@ ConceptManager.getRelatedConcepts({
 });
 ```
 
+### Minimum Results Feature
+
+The `minResults` and `strictMinResults` parameters provide adaptive scoring to ensure you get meaningful results even when your criteria are too restrictive:
+
+```dataviewjs
+const { ConceptManager } = customJS;
+ConceptManager.getRelatedConcepts({
+    dv,
+    minScore: 0.85,            // Start with high confidence requirement
+    minResults: 5,             // But ensure at least 5 results
+    strictMinResults: true,    // Allow adaptive scoring
+    debug: true                // Show the adaptation process
+});
+```
+
+With `strictMinResults: true`, the system will lower the `minScore` threshold until `minResults` is reached.
+
+### Maximum Results Feature
+
+The `maxResults` and `strictMaxResults` parameters provide flexibility in the number of results returned.
+
+```dataviewjs
+const { ConceptManager } = customJS;
+ConceptManager.getRelatedConcepts({
+    dv,
+    maxResults: 10,
+    strictMaxResults: true,
+    debug: true
+});
+```
+
+With `strictMaxResults: false`, the system will keep the results past the `maxResults` limit, if they have the same confidence score.
+
 ### Debugging
 
 With `debug: true` in your `getRelatedConcepts()` call, you'll see detailed output in your Obsidian console, including:
@@ -305,41 +341,50 @@ With `debug: true` in your `getRelatedConcepts()` call, you'll see detailed outp
 
 This enhanced debug output is invaluable for understanding how results are filtered and scored.
 
-## 🚀 NEW: Distance-Based Path Scoring
+## 📍 Distance-Based Path Scoring
 
-**Revolutionary improvement over binary path scoring!** The new distance-based path scoring system provides a nuanced approach to measuring structural relationships in your knowledge base.
+The distance-based path scoring system leverages **Structural Organization** - the principle that filesystem placement reflects conceptual relationships in your knowledge base. When files are organized into meaningful domain-specific folders, their physical proximity often indicates stronger conceptual connections.
 
-### What Changed
+### Structural Organization Integration
 
-**Before** (Old Binary System):
-- Same folder: 2 points  
-- Subfolder: 1 point
-- Everything else: 0 points
+Path distance scoring recognizes that your folder structure represents semantic clustering:
+- **Same folder**: Files addressing the same domain or concept area
+- **Sibling folders**: Related but distinct domains  
+- **Distant paths**: Conceptually distant or cross-domain relationships
 
-**After** (New Distance-Based System):
-- **Smooth proximity gradient** based on filesystem jumps
-- **Rewards your structural organization** efforts
-- **Performance optimized** with subject filtering
+This aligns with the framework's **Structural Organization** principle, where "folder hierarchy reflects knowledge taxonomy" and "path structure indicates conceptual relationships."
 
-### How Distance Calculation Works
+### Distance Calculation
 
-The system calculates the minimum number of directory navigation steps between two files:
+The system measures filesystem navigation steps between files, rewarding structural proximity:
 
 ```
-Maya Deren.md → Divine.md
-└─ People/Maya Deren.md
-└─ People/Divine.md
-Distance: 0 jumps (same folder)
+Maya Deren ─→ Divine
+Distance: 0 hops 
 
-Maya Deren.md → Pink Flamingos.md  
-└─ People/Maya Deren.md
-└─ Movies/Pink Flamingos.md  
-Distance: 2 jumps (../Movies/)
+ People            # Same folder
+ ├─ Maya Deren.md  # Starting point
+ └─ Divine.md      # Ending point
 
-Maya Deren.md → American Avant-Garde.md
-└─ People/Maya Deren.md
-└─ Cinematic Theory/Movements/American Avant-Garde.md
-Distance: 5 jumps (../../../Cinematic Theory/Movements/)
+Maya Deren ─→ Pink Flamingos
+Distance: 2 hops
+
+ Production                    # Common ancestor
+ │  └─ [1↑] People/            # [1↑] First level up
+ │          └─ Maya Deren.md   # Starting point
+ └─ [1↓] Movies/               # [1↓] First level down
+         └─ Pink Flamingos.md  # Ending point
+
+Maya Deren ─→ American Avant-Garde
+Distance: 4 hops
+
+ 2. Knowledge                                # Common ancestor
+ │  └─ [2↑] Production/                      # [2↑] Second level up
+ │          └─ [1↑] People/                  # [1↑] First level up
+ │                  └─ Maya Deren.md         # Starting point
+ └─ [1↓] Cinematic Theory/                   # [1↓] First level down
+         └─ [2↓] Movements/                  # [2↓] Second level down
+                 └─ American Avant-Garde.md  # Ending point
 ```
 
 ### Scoring Formula
@@ -352,14 +397,13 @@ Distance: 5 jumps (../../../Cinematic Theory/Movements/)
 - 1 jump: **1.00 points** (50% - parent/child)  
 - 2 jumps: **0.67 points** (33% - siblings)
 - 5 jumps: **0.33 points** (17% - distant cousins)
-- 10 jumps: **0.18 points** (9% - very distant)
 
 ### Performance & Scope Control
 
-**✅ Smart Limitations:**
+**Smart Limitations:**
 - Only considers files with **valid subjects** (from config)
 - Respects **`maxPathDistance`** threshold (default: 10 jumps)
-- **No vault-wide scanning** - keeps queries fast
+- **No vault-wide scanning** 
 
 **⚡ Performance Benefits:**
 - Prevents unnecessary distance calculations for irrelevant files
