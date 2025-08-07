@@ -25,12 +25,20 @@
  *   // display patterns, supporting both simple calls and full parameter customization.
  *   const { ConceptWrappers } = customJS;
  *   
- *   // Simple usage with sensible defaults
- *   ConceptWrappers.renderConceptFooter(dv);
+ *   // Smart View Presets (NEW!)
+ *   ConceptWrappers.renderFullSmartView(dv);      // All features: concept analysis + group views
+ *   ConceptWrappers.renderLightSmartView(dv);     // Concept analysis only
+ *   ConceptWrappers.renderGroupSmartView(dv);     // Group-focused: items + relationships
  *   
- *   // Full parameter control (ALL getRelatedConcepts options supported)
- *   ConceptWrappers.renderHubFooter(dv, {
- *       conceptOptions: { minScore: 0.6, maxResults: 10 }
+ *   // Traditional relationship displays
+ *   ConceptWrappers.renderConceptFooter(dv);      // Similar concepts
+ *   ConceptWrappers.renderHubFooter(dv);          // Related hubs
+ *   
+ *   // Full parameter control (ALL options supported)
+ *   ConceptWrappers.renderFullSmartView(dv, {
+ *       headerLevel: 3, 
+ *       debug: true,
+ *       groupItemsHeaderText: "Custom Header"
  *   });
  *   ```
  *
@@ -186,6 +194,95 @@ class ConceptWrappers {
         
         dv.paragraph("---");
         this.renderSimilarPages(dv, finalOptions);
+    }
+
+    /**
+     * Renders the full smart view with all available features enabled
+     * 
+     * Executes all 3 steps of the SmartView generator:
+     * 1. Concept Analysis - Shows concept relationships and groups
+     * 2. Group Items List - Shows items belonging to this group
+     * 3. View Table - Shows group relationships and hubs
+     * 
+     * @param {Object} dv - DataView API object
+     * @param {Object} [options={}] - All smart view options
+     * @param {number} [options.headerLevel=2] - Header level (1-6)
+     * @param {string} [options.groupItemsHeaderText] - Custom header for group items
+     * @param {boolean} [options.debug=false] - Enable debug output
+     */
+    renderFullSmartView(dv, options = {}) {
+        const { ConceptManager } = customJS;
+        
+        const defaultOptions = {
+            dv,
+            headerLevel: 2,
+            enabledSteps: ['conceptAnalysis', 'groupItems', 'viewTable'],
+            debug: false
+        };
+        
+        const finalOptions = { ...defaultOptions, ...options, dv };
+        
+        ConceptManager.generateSmartView(finalOptions);
+    }
+
+    /**
+     * Renders a lightweight smart view focused on concept analysis only
+     * 
+     * Executes only step 1 of the SmartView generator:
+     * 1. Concept Analysis - Shows concept relationships and groups
+     * 
+     * Perfect for pages where you only want to show concept relationships
+     * without the additional group-related views.
+     * 
+     * @param {Object} dv - DataView API object
+     * @param {Object} [options={}] - All smart view options
+     * @param {number} [options.headerLevel=2] - Header level (1-6)
+     * @param {boolean} [options.debug=false] - Enable debug output
+     */
+    renderLightSmartView(dv, options = {}) {
+        const { ConceptManager } = customJS;
+        
+        const defaultOptions = {
+            dv,
+            headerLevel: 2,
+            enabledSteps: ['conceptAnalysis'],
+            debug: false
+        };
+        
+        const finalOptions = { ...defaultOptions, ...options, dv };
+        
+        ConceptManager.generateSmartView(finalOptions);
+    }
+
+    /**
+     * Renders a group-focused smart view for pages with domain-category
+     * 
+     * Executes steps 2 and 3 of the SmartView generator:
+     * 2. Group Items List - Shows items belonging to this group
+     * 3. View Table - Shows group relationships and hubs
+     * 
+     * Perfect for group/category pages where you want to focus on
+     * group membership and relationships without concept analysis.
+     * 
+     * @param {Object} dv - DataView API object
+     * @param {Object} [options={}] - All smart view options
+     * @param {number} [options.headerLevel=2] - Header level (1-6)
+     * @param {string} [options.groupItemsHeaderText] - Custom header for group items
+     * @param {boolean} [options.debug=false] - Enable debug output
+     */
+    renderGroupSmartView(dv, options = {}) {
+        const { ConceptManager } = customJS;
+        
+        const defaultOptions = {
+            dv,
+            headerLevel: 2,
+            enabledSteps: ['groupItems', 'viewTable'],
+            debug: false
+        };
+        
+        const finalOptions = { ...defaultOptions, ...options, dv };
+        
+        ConceptManager.generateSmartView(finalOptions);
     }
 
 }
