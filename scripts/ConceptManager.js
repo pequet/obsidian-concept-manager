@@ -1195,13 +1195,15 @@ class ConceptManager {
             dv.paragraph(`Search criteria: type="hub", domain-category="${domainCategory}", subject="${subject}"`);
         }
         
-        // Look for Hub pages with matching domain-category and subject
+        // Look for Hub pages with matching domain-category (string or array) and subject
         const hubs = dv.pages()
-            .where(p => 
-                p.type === "hub" &&
-                p["domain-category"] === domainCategory &&
-                p.subject === subject
-            );
+            .where(p => {
+                if (p.type !== "hub") return false;
+                if (p.subject !== subject) return false;
+                if (!p["domain-category"]) return false;
+                const hubCats = this.normalizeValues(p["domain-category"]);
+                return hubCats.includes(domainCategory);
+            });
         
         if (debug) {
             dv.paragraph(`Found ${hubs.length} matching Hub(s)`);
@@ -1278,7 +1280,10 @@ class ConceptManager {
                 dv.paragraph(`⚙️ No Hub found, using fallback: "${domainCategory}"`);
                 dv.paragraph(`💡 Tip: Create a Hub page to customize this display name. Optionally, add a "canonical-name" field to the Hub page to override the page name.`);
             }
-            return `"${domainCategory}"`;
+            const titleCase = String(domainCategory)
+                .replace(/[-_]+/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+            return titleCase;
         }
     }
 
@@ -2139,29 +2144,16 @@ class ConceptManager {
                     dv.paragraph(`Looking for hub with: type="hub" AND domain-category="${hubCategory}"`);
                 }
                 
-                // Find the hub page for this relation type (updated to remove domain requirement)
-                const hubPages = dv.pages()
-                    .where(p => 
-                        p.type === "hub" &&
-                        p["domain-category"] === hubCategory
-                    );
+                // Resolve a user-friendly display name for this category via helper
+                const headerText = this.getDisplayNameForCategory({
+                    dv,
+                    domainCategory: hubCategory,
+                    subject: currentSubject,
+                    debug
+                });
                 
-                const hub = hubPages.length > 0 ? hubPages[0] : null;
-                
-                // Use hub name if available, otherwise format the type
-                const headerText = hub ? 
-                    hub.file.name : 
-                    type.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                    
                 if (debug) {
-                    if (hubPages.length === 1) {
-                        dv.paragraph(`✅ Found Hub: ${hub.file.name} (${hub.file.path})`);
-                    } else if (hubPages.length > 1) {
-                        dv.paragraph(`⚠️ Warning: Found ${hubPages.length} hub pages for domain-category "${hubCategory}" - using first: ${hub.file.name}`);
-                        dv.paragraph(`  • All matches: [${hubPages.map(p => p.file.name).join(', ')}]`);
-                    } else {
-                        dv.paragraph(`❌ No Hub found - using formatted type name: "${headerText}"`);
-                    }
+                    dv.paragraph(`🧭 Display name resolved for category "${hubCategory}": ${headerText}`);
                 }
 
                 const currentValues = currentPage["group-" + type] || [];
