@@ -49,6 +49,110 @@ class ConceptManager {
         
         // Initialize any properties here
         this.debug = false;
+
+        // Performance logging controls
+        this.perf = { enabled: false, logToConsole: true };
+
+        // Aggregated perf totals and call counters (reset per render/session as desired)
+        this._perfTotals = new Map(); // label -> { count, totalMs }
+        this._callCounts = {};        // functionName -> count
+
+        // Config memoization
+        this._configCache = new Map(); // subject -> { value, cachedAt }
+        this._configCacheOptions = { enabled: true, ttlMs: 0 }; // ttlMs = 0 means no TTL
+    }
+
+    // --- Performance Logging Controls ---
+    enablePerfLogging({ enabled = true, logToConsole = true } = {}) {
+        this.perf = this.perf || {};
+        this.perf.enabled = !!enabled;
+        this.perf.logToConsole = !!logToConsole;
+        return this;
+    }
+
+    disablePerfLogging() {
+        if (!this.perf) this.perf = {};
+        this.perf.enabled = false;
+        return this;
+    }
+
+    _perfStart(label) {
+        if (!this.perf || !this.perf.enabled) return null;
+        const startedAtMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        return { label, startedAtMs };
+    }
+
+    _perfEnd(token, details = {}) {
+        if (!this.perf || !this.perf.enabled || !token) return;
+        const endedAtMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const durationMs = endedAtMs - token.startedAtMs;
+        // Aggregate totals
+        const agg = this._perfTotals.get(token.label) || { count: 0, totalMs: 0 };
+        agg.count += 1;
+        agg.totalMs += durationMs;
+        this._perfTotals.set(token.label, agg);
+        if (this.perf.logToConsole && typeof console !== 'undefined') {
+            const payload = { durationMs: Math.round(durationMs), ...details };
+            if (console.debug) {
+                console.debug('[ConceptManager][perf]', token.label, payload);
+            } else if (console.log) {
+                console.log('[ConceptManager][perf]', token.label, payload);
+            }
+        }
+    }
+
+    printPerfSummaryToDv({ dv }) {
+        if (!dv) return;
+        const summary = this.getPerfSummary();
+        dv.header(3, 'Performance Summary');
+        const calls = Object.entries(summary.callCounts).map(([fn, count]) => `${fn}: ${count}`);
+        if (calls.length > 0) {
+            dv.paragraph('Function Calls:');
+            dv.list(calls);
+        } else {
+            dv.paragraph('Function Calls: none recorded');
+        }
+        const totals = Object.entries(summary.totals).map(([label, v]) => `${label}: count=${v.count}, totalMs=${v.totalMs}`);
+        if (totals.length > 0) {
+            dv.paragraph('Timers:');
+            dv.list(totals);
+        } else {
+            dv.paragraph('Timers: none recorded');
+        }
+    }
+
+    resetPerfStats() {
+        this._perfTotals = new Map();
+        this._callCounts = {};
+        return this;
+    }
+
+    getPerfSummary() {
+        // Convert Map to plain object for easier logging/reading
+        const totals = {};
+        for (const [label, v] of this._perfTotals.entries()) {
+            totals[label] = { count: v.count, totalMs: Math.round(v.totalMs) };
+        }
+        return { totals, callCounts: { ...this._callCounts } };
+    }
+
+    enableConfigMemoization({ enabled = true, ttlMs = 0 } = {}) {
+        this._configCacheOptions.enabled = !!enabled;
+        this._configCacheOptions.ttlMs = Number(ttlMs) >= 0 ? Number(ttlMs) : 0;
+        return this;
+    }
+
+    invalidateConfigCache(subject = null) {
+        if (subject) {
+            this._configCache.delete(subject);
+        } else {
+            this._configCache.clear();
+        }
+        return this;
+    }
+
+    _incrementCallCount(functionName) {
+        this._callCounts[functionName] = (this._callCounts[functionName] || 0) + 1;
     }
 
     /*
@@ -157,10 +261,13 @@ class ConceptManager {
      * @returns {Array} Array of {file, distance} objects sorted by distance
      */
     getRelatedFilesByDistance({ dv, currentPath, validSubjects = [], validDomains = [], maxDistance = 10 }) {
+        const __perfMethod = this._perfStart('getRelatedFilesByDistance');
         const relatedFiles = [];
         
         // Get all files first (excluding current file)
+        const __qStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         const allFiles = dv.pages().where(p => p.file.path !== currentPath).array();
+        const __qDuration = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - __qStart;
         
         // Apply subject filtering
         const subjectFilteredFiles = validSubjects.length === 0 ? allFiles : 
@@ -169,6 +276,16 @@ class ConceptManager {
         // Apply domain filtering
         const candidateFiles = validDomains.length === 0 ? subjectFilteredFiles :
             subjectFilteredFiles.filter(p => validDomains.includes(p.domain));
+
+        // Perf log for the query and filtering scope
+        this._perfEnd(__perfMethod && { label: 'getRelatedFilesByDistance.query', startedAtMs: __qStart }, {
+            allFiles: allFiles.length,
+            subjectFiltered: subjectFilteredFiles.length,
+            candidateFiles: candidateFiles.length,
+            maxDistance,
+            validSubjects: validSubjects.length,
+            validDomains: validDomains.length
+        });
         
         // Debug information for troubleshooting
         console.log(`[DEBUG] getRelatedFilesByDistance filtering:
@@ -187,7 +304,9 @@ class ConceptManager {
         });
         
         // Sort by distance (closest first)
-        return relatedFiles.sort((a, b) => a.distance - b.distance);
+        const sorted = relatedFiles.sort((a, b) => a.distance - b.distance);
+        this._perfEnd(__perfMethod, { returned: sorted.length });
+        return sorted;
     }
 
     /**
@@ -306,14 +425,17 @@ class ConceptManager {
         maxPathDistance = 4,
         debug = false 
     }) {
+        const __perfMethod = this._perfStart('getRelatedConcepts');
         const current = dv.current();
         
         // Get config validation for the current page's subject
+        const __cfgToken = this._perfStart('getRelatedConcepts.config');
         const config = this.getConfigForSubject({ 
             dv, 
             subject: current.subject, 
             debug: debug 
         });
+        this._perfEnd(__cfgToken, { hasConfig: !!config && config.hasConfig, validSubjects: (config.validSubjects || []).length, validDomains: (config.validDomains || []).length });
         
         if (debug) {
             dv.paragraph(`**🔧 Config Lookup for Subject: "${config.debugInfo.subject}"**`);
@@ -468,6 +590,7 @@ class ConceptManager {
         
         if (includePath) {
             // Use new distance-based approach, limited to valid subjects for performance
+            const __distToken = this._perfStart('getRelatedConcepts.distanceSearch');
             const distanceFiles = this.getRelatedFilesByDistance({ 
                 dv, 
                 currentPath: current.file.path, 
@@ -475,6 +598,7 @@ class ConceptManager {
                 validDomains: config.validDomains,
                 maxDistance: maxPathDistance 
             });
+            this._perfEnd(__distToken, { count: distanceFiles.length, maxDistance: maxPathDistance, includePath });
         
             if (debug) {
                 dv.paragraph(`**Step 1: Finding files by distance-based path scoring**`);
@@ -575,6 +699,7 @@ class ConceptManager {
             }
             
             // Find all files that match this criteria
+            const __fieldToken = this._perfStart(`getRelatedConcepts.fieldQuery:${field}`);
             const matchingConcepts = dv.pages()
                 .where(p => {
                     // Exclude current page
@@ -599,6 +724,7 @@ class ConceptManager {
                     // Check if any of the target values match any of the page values
                     return targetValues.some(tv => pageValues.includes(tv));
             });
+            this._perfEnd(__fieldToken, { field, matches: matchingConcepts.length, targetCount: targetValues.length, subjectFilterApplied: !!searchFilters.subject, domainFilterApplied: !!searchFilters.domain });
             
             if (debug) {
                 dv.paragraph(`**QUERY RESULTS:**`);
@@ -660,6 +786,7 @@ class ConceptManager {
             
             domainCategories.forEach(category => {
                 const groupFieldName = `group-${category}`;
+                const __revToken = this._perfStart(`getRelatedConcepts.reverse:${groupFieldName}`);
                 
                 // Validate that this group field is in config
                 const validation = this.isValidGroupField({ 
@@ -671,6 +798,7 @@ class ConceptManager {
                     if (debug) {
                         dv.paragraph(`⚠️ Skipping reverse lookup for invalid group field: ${validation.reason}`);
                     }
+                    this._perfEnd(__revToken, { skipped: true });
                     return;
                 }
                 
@@ -701,6 +829,7 @@ class ConceptManager {
                             return fieldValue && fieldValue.toString().includes(currentPageName);
                         }
                     });
+                this._perfEnd(__revToken, { matches: reverseMatchingConcepts.length });
                 
                 if (debug) {
                     dv.paragraph(`**REVERSE LOOKUP RESULTS:**`);
@@ -749,6 +878,7 @@ class ConceptManager {
                 }
 
                 currentGroupFields.forEach(groupFieldName => {
+                    const __fwdToken = this._perfStart(`getRelatedConcepts.forward:${groupFieldName}`);
                     // Validate this group field against config
                     const validation = this.isValidGroupField({ 
                         groupFieldName, 
@@ -759,6 +889,7 @@ class ConceptManager {
                         if (debug) {
                             dv.paragraph(`⚠️ Skipping forward lookup for invalid group field: ${validation.reason}`);
                         }
+                        this._perfEnd(__fwdToken, { skipped: true });
                         return;
                     }
 
@@ -772,6 +903,7 @@ class ConceptManager {
                         dv.paragraph(`  • And whose domain-category includes: "${expectedCategory}"`);
                     }
 
+                    let totalForwardMatches = 0;
                     entityNames.forEach(nameValue => {
                         const nameValueLower = String(nameValue).toLowerCase();
                         const forwardMatches = dv.pages()
@@ -789,6 +921,7 @@ class ConceptManager {
                                 const pageNameLower = String(p.file.name).toLowerCase();
                                 return pageNameLower.includes(nameValueLower);
                             });
+                        totalForwardMatches += forwardMatches.length;
 
                         if (debug) {
                             const count = forwardMatches.length;
@@ -813,6 +946,7 @@ class ConceptManager {
                             relatedConcepts.get(conceptId).scores.set(key, forwardScoreMultiplier);
                         });
                     });
+                    this._perfEnd(__fwdToken, { names: entityNames.length, matches: totalForwardMatches });
                 });
 
                 if (debug) {
@@ -1107,6 +1241,7 @@ class ConceptManager {
             dv.paragraph("---");
         }
         
+        this._perfEnd(__perfMethod, { results: finalResults.length });
         return finalResults;
     }
 
@@ -1140,6 +1275,21 @@ class ConceptManager {
      * // Returns: { validFilters: [...], validSubjects: [...], configPage: {...} }
      */
     getConfigForSubject({ dv, subject, debug = false }) {
+        this._incrementCallCount('getConfigForSubject');
+
+        // Memoization
+        if (this._configCacheOptions.enabled) {
+            const cached = this._configCache.get(subject);
+            if (cached) {
+                const nowMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                const ageMs = nowMs - cached.cachedAt;
+                if (this._configCacheOptions.ttlMs === 0 || ageMs <= this._configCacheOptions.ttlMs) {
+                    return cached.value;
+                }
+            }
+        }
+
+        const __perfToken = this._perfStart('getConfigForSubject');
         // Find config page with matching subject
         const configPages = dv.pages()
             .where(p => 
@@ -1170,7 +1320,7 @@ class ConceptManager {
             hasConfig: !!configPage
         };
         
-        return {
+        const result = {
             validFilters,
             validSubjects,
             validDomains,
@@ -1178,6 +1328,15 @@ class ConceptManager {
             hasConfig: !!configPage,
             debugInfo
         };
+
+        // Store in cache
+        if (this._configCacheOptions.enabled) {
+            const nowMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            this._configCache.set(subject, { value: result, cachedAt: nowMs });
+        }
+
+        this._perfEnd(__perfToken, { subject, hasConfig: result.hasConfig });
+        return result;
     }
 
     /**
@@ -3062,7 +3221,7 @@ class ConceptManager {
                 //     }
                 // }
 
-                let headerText = `Key Connections (n)`; // Content related to ${currentPage.file.name}
+                let headerText = `Key Connections (n)`; // Content related to ${currentPage.file.name} ??????????????????????
                 
                 if (debug) {
                     dv.paragraph(`Final header text: ${headerText}`);
