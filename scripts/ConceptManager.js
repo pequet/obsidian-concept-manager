@@ -264,18 +264,21 @@ class ConceptManager {
         const __perfMethod = this._perfStart('getRelatedFilesByDistance');
         const relatedFiles = [];
         
-        // Get all files first (excluding current file)
+        // Early-filter candidates by subject/domain inside the query
+        const validSubjectsSet = new Set(validSubjects || []);
+        const validDomainsSet = new Set(validDomains || []);
         const __qStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-        const allFiles = dv.pages().where(p => p.file.path !== currentPath).array();
+        const candidateFiles = dv.pages().where(p => {
+            if (p.file.path === currentPath) return false;
+            if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+            if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
+            return true;
+        }).array();
         const __qDuration = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - __qStart;
         
-        // Apply subject filtering
-        const subjectFilteredFiles = validSubjects.length === 0 ? allFiles : 
-            allFiles.filter(p => validSubjects.includes(p.subject));
-        
-        // Apply domain filtering
-        const candidateFiles = validDomains.length === 0 ? subjectFilteredFiles :
-            subjectFilteredFiles.filter(p => validDomains.includes(p.domain));
+        // For backward-compatible logging variables
+        const allFiles = candidateFiles;
+        const subjectFilteredFiles = candidateFiles;
 
         // Perf log for the query and filtering scope
         this._perfEnd(__perfMethod && { label: 'getRelatedFilesByDistance.query', startedAtMs: __qStart }, {
@@ -289,10 +292,10 @@ class ConceptManager {
         
         // Debug information for troubleshooting
         console.log(`[DEBUG] getRelatedFilesByDistance filtering:
-          - Total files (excluding current): ${allFiles.length}
-          - After subject filtering [${validSubjects.join(', ')}]: ${subjectFilteredFiles.length}
-          - After domain filtering [${validDomains.join(', ')}]: ${candidateFiles.length}
-          - Sample domains found: ${[...new Set(allFiles.map(p => p.domain).filter(Boolean))].slice(0, 5).join(', ')}`);
+          - Early-filtered candidates (subject/domain): ${candidateFiles.length}
+          - Subject filter used: [${validSubjects.join(', ')}]
+          - Domain filter used: [${validDomains.join(', ')}]
+          - Sample candidate domains: ${[...new Set(candidateFiles.map(p => p.domain).filter(Boolean))].slice(0, 5).join(', ')}`);
         
         candidateFiles.forEach(file => {
             const distance = this.calculatePathDistance(currentPath, file.file.path);
@@ -1734,10 +1737,14 @@ class ConceptManager {
                 }
 
                 // Get related pages - match any page that has at least one matching domain category
+                const validSubjectsSet = new Set(config.validSubjects || []);
+                const validDomainsSet = new Set(config.validDomains || []);
                 const allPages = dv.pages()
                     .where(p => {
                         if (!p["domain-category"]) return false;
-                        
+                        // Early subject/domain filters
+                        if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+                        if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
                         const pageCats = this.normalizeValues(p["domain-category"]);
                         return pageCats.some(cat => domainCategoryKeys.includes(cat)) && 
                             p.type !== "hub"; // Exclude hub pages
@@ -1801,14 +1808,14 @@ class ConceptManager {
 
                     // Build columns: Name, Summary, Subject (optional), Type, Domain (requested order)
                     const columns = ["Name", "Summary"]; 
-                    if (includeSubjectColumn) columns.push("Subject");
                     columns.push("Type", "Domain");
+                    if (includeSubjectColumn) columns.push("Subject");
 
                     // Build rows
                     const rows = sortedPages.map(p => {
                         const row = [p.file.link, p.summary || ""];
-                        if (includeSubjectColumn) row.push(p.subject || "");
                         row.push(p.type || "", p.domain || "");
+                        if (includeSubjectColumn) row.push(p.subject || "");
                         return row; 
                     });
 
@@ -1826,13 +1833,15 @@ class ConceptManager {
                 // This is a regular page - show related Groups (Concepts/Core Patterns) and link to ALL matching Hubs
                 
                 // Find ALL Hub pages for this domain-category
+                const validSubjectsSet2 = new Set(config.validSubjects || []);
+                const validDomainsSet2 = new Set(config.validDomains || []);
                 const hubs = dv.pages()
                     .where(p => {
                         if (p.type !== "hub") return false;
-                        
-                        // Check if Hub's domain-category match any of the current page's categories
                         if (!p["domain-category"]) return false;
-                        
+                        // Early subject/domain filters
+                        if (validSubjectsSet2.size > 0 && !validSubjectsSet2.has(p.subject)) return false;
+                        if (validDomainsSet2.size > 0 && !validDomainsSet2.has(p.domain)) return false;
                         const hubCats = this.normalizeValues(p["domain-category"]);
                         return hubCats.some(cat => domainCategoryKeys.includes(cat));
                     });
@@ -1897,13 +1906,16 @@ class ConceptManager {
                     }
                     
                     // Find other Groups (Concepts/Core Patterns) in ALL matching Hubs
+                    const validSubjectsSet3 = new Set(config.validSubjects || []);
+                    const validDomainsSet3 = new Set(config.validDomains || []);
                     const allRelatedGroups = dv.pages()
                         .where(p => {
                             if (!p["domain-category"] || p.file.path === currentPage.file.path || p.type === "hub") return false;
-                            
+                            // Early subject/domain filters
+                            if (validSubjectsSet3.size > 0 && !validSubjectsSet3.has(p.subject)) return false;
+                            if (validDomainsSet3.size > 0 && !validDomainsSet3.has(p.domain)) return false;
                             // Check if page matches any of the hubs
                             const pageCats = this.normalizeValues(p["domain-category"]);
-                            
                             return hubs.some(hub => {
                                 const hubCats = this.normalizeValues(hub["domain-category"]);
                                 return pageCats.some(cat => hubCats.includes(cat));
@@ -2227,9 +2239,14 @@ class ConceptManager {
                 let totalConnections = 0;
                 groupTypes.forEach(type => {
                     const groupFieldName = `group-${type}`;
+                    const validSubjectsSet = new Set(config.validSubjects || []);
+                    const validDomainsSet = new Set(config.validDomains || []);
                     const allMatchingPages = dv.pages()
                         .where(p => {
                             if (!p[groupFieldName]) return false;
+                            // Early subject/domain filters
+                            if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+                            if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
                             const pageValues = this.normalizeValues(p[groupFieldName]);
                             return pageValues.some(val => 
                                 String(val).toLowerCase() === String(groupValue).toLowerCase()
@@ -2679,8 +2696,13 @@ class ConceptManager {
         let totalConnections = 0;
         (relationTypes || []).forEach(type => {
             const groupFieldName = `group-${type}`;
+            const validSubjectsSet = new Set(config.validSubjects || []);
+            const validDomainsSet = new Set(config.validDomains || []);
             const allMatchingPages = dv.pages().where(p => {
                 if (!p[groupFieldName]) return false;
+                // Early subject/domain filters
+                if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+                if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
                 const pageValues = this.normalizeValues(p[groupFieldName]);
                 return pageValues.some(val => String(val).toLowerCase() === String(groupValue).toLowerCase());
             });
@@ -2709,9 +2731,14 @@ class ConceptManager {
         // Render only non-empty categories
         (relationTypes || []).forEach(type => {
             const groupFieldName = `group-${type}`;
+            const validSubjectsSet = new Set(config.validSubjects || []);
+            const validDomainsSet = new Set(config.validDomains || []);
 
             const allMatchingPages = dv.pages().where(p => {
                 if (!p[groupFieldName]) return false;
+                // Early subject/domain filters
+                if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+                if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
                 const pageValues = this.normalizeValues(p[groupFieldName]);
                 return pageValues.some(val => String(val).toLowerCase() === String(groupValue).toLowerCase());
             });
