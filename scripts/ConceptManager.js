@@ -300,7 +300,7 @@ class ConceptManager {
         maxResults = 10, 
         strictMaxResults = false,
         scoreMultiplier = 1.5,
-        reverseScoreMultiplier = 2.5,
+        reverseScoreMultiplier = 3.0,
         pathDistanceMultiplier = 3.0,
         maxPathDistance = 4,
         debug = false 
@@ -2256,7 +2256,9 @@ class ConceptManager {
             }
 
             const currentValues = currentPage["group-" + type] || [];
-            const normalizedValues = Array.isArray(currentValues) ? currentValues : [currentValues];
+            const normalizedValues = this.normalizeValues(currentValues)
+                .map(v => String(v).trim())
+                .filter(v => v.length > 0);
 
             if (debug) {
                 dv.paragraph(`**🔍 HEADER DECISION POINT FOR "${type}":**`);
@@ -2285,12 +2287,19 @@ class ConceptManager {
                 dv.paragraph(`Will create links for each value by searching for pages with file.name matching the value AND domain="concepts" or "patterns"`);
             }
 
-            // STEP 1: Collect all matching data first
+            // STEP 1: Collect all matching data first (case-insensitive; supports aliases)
             const matchResults = normalizedValues.map(value => {
+                const valueString = String(value).trim();
+                const valueLower = valueString.toLowerCase();
                 const matchingPages = dv.pages()
-                    .where(p => String(p.file.name) === String(value) &&
-                        (p.domain === "concepts" || p.domain === "patterns"));
-                return { value, matchingPages };
+                    .where(p => (
+                        (p.domain === "concepts" || p.domain === "patterns") &&
+                        (
+                            (p.file && p.file.name && String(p.file.name).toLowerCase() === valueLower) ||
+                            (Array.isArray(p.aliases) && p.aliases.some(a => String(a).toLowerCase() === valueLower))
+                        )
+                    ));
+                return { value: valueString, matchingPages };
             });
 
             // STEP 2: Process results and handle multiple matches
@@ -2529,14 +2538,20 @@ class ConceptManager {
         if (filteredResults.length === 0) {
             dv.paragraph("No related \"CONCEPTS\" found.");
         } else {
-            dv.table(["Name", "Type", "Domain", "Confidence"],
-                filteredResults.map(r => [
-                    dv.fileLink(r.concept.file.path, false, r.concept.file.name),
-                    r.concept.type || "",
-                    r.concept.domain || "",
-                    `${r.confidence.toFixed(1)}%`
-                ])
-            );
+            // Include Subject column if results span multiple subjects (within the subjectsToUse filter)
+            const uniqueSubjects = Array.from(new Set(filteredResults.map(r => r.concept.subject).filter(Boolean)));
+            const includeSubjectColumn = uniqueSubjects.length > 1;
+
+            const headers = ["Name", "Type", "Domain", ...(includeSubjectColumn ? ["Subject"] : []), "Confidence"];
+            const rows = filteredResults.map(r => [
+                dv.fileLink(r.concept.file.path, false, r.concept.file.name),
+                r.concept.type || "",
+                r.concept.domain || "",
+                ...(includeSubjectColumn ? [r.concept.subject || ""] : []),
+                `${r.confidence.toFixed(1)}%`
+            ]);
+
+            dv.table(headers, rows);
         }
     }
 
