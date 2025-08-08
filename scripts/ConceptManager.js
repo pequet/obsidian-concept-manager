@@ -2650,6 +2650,8 @@ class ConceptManager {
      * 5. **View Table**: If page has "domain-category", calls `generateViewTable()`
      *    - Shows related groups and hub relationships based on domain-category
      * 
+     * Note: Step 4 runs only if Step 3 did not run (to avoid duplicate Key Connections).
+     * 
      * ## Step Selection:
      * You can control which steps execute using the `enabledSteps` parameter:
      * - `conceptAnalysis`: Step 3 - Shows concept relationships and groups
