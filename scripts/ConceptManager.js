@@ -1179,6 +1179,19 @@ class ConceptManager {
     }
 
     /**
+     * ...
+     */
+    getRelationLabel({ dv, domainCategory, direction, subject, debug = false }) {
+        if (debug) {
+            dv.paragraph(`**🔍 Looking up relation label for domain-category: "${domainCategory}" and direction: "${direction}"**`);
+            dv.paragraph(`Search criteria: type="hub", domain-category="${domainCategory}", subject="${subject}"`);
+        }
+        // ...
+        
+    }
+
+
+    /**
      * Gets the canonical display name for a domain category by looking for a Hub page
      * Searches for Hub pages with matching domain-category and subject
      * 
@@ -1285,6 +1298,61 @@ class ConceptManager {
                 .replace(/\b\w/g, c => c.toUpperCase());
             return titleCase;
         }
+    }
+
+    /**
+     * Gets a relation label (incoming/outgoing) for a given domain category from its Hub frontmatter.
+     * Falls back to the category display name if no specific relation label is defined.
+     *
+     * Expected Hub frontmatter keys:
+     * - relation-incoming: e.g., "Directed by", "Starring"
+     * - relation-outgoing: e.g., "Directed", "Acted in"
+     *
+     * @param {Object} params - Parameters object
+     * @param {Object} params.dv - The Dataview API object
+     * @param {string} params.domainCategory - The domain category to resolve (e.g., "director", "actor")
+     * @param {string} params.subject - Subject namespace to filter the Hub
+     * @param {('incoming'|'outgoing')} [params.direction='outgoing'] - Relation direction
+     * @param {boolean} [params.debug=false] - Enable debug output
+     * @returns {string} The relation label or a sensible fallback
+     */
+    getRelationLabel({ dv, domainCategory, subject, direction = 'outgoing', debug = false }) {
+        const directionKey = direction === 'incoming' ? 'relation-incoming' : 'relation-outgoing';
+
+        if (debug) {
+            dv.paragraph(`**🧭 Resolving relation label** for category: "${domainCategory}", subject: "${subject}", direction: "${direction}"`);
+        }
+
+        // Look for Hub pages with matching domain-category (string or array) and subject
+        const hubs = dv.pages()
+            .where(p => {
+                if (p.type !== "hub") return false;
+                if (p.subject !== subject) return false;
+                if (!p["domain-category"]) return false;
+                const hubCats = this.normalizeValues(p["domain-category"]);
+                return hubCats.includes(domainCategory);
+            });
+
+        if (hubs.length > 0) {
+            const hub = hubs[0];
+            const label = hub[directionKey];
+
+            if (typeof label === 'string' && label.trim().length > 0) {
+                if (debug) {
+                    dv.paragraph(`✅ Using hub frontmatter label (${directionKey}): "${label}" from Hub: ${hub.file.name}`);
+                }
+                return label.trim();
+            }
+
+            if (debug) {
+                dv.paragraph(`ℹ️ No "${directionKey}" on Hub: ${hub.file.name}. Falling back to display name for category.`);
+            }
+        } else if (debug) {
+            dv.paragraph(`❌ No Hub found for domain-category: "${domainCategory}" and subject: "${subject}". Using fallback.`);
+        }
+
+        // Fallback to the category display name (canonical name or formatted key)
+        return this.getDisplayNameForCategory({ dv, domainCategory, subject, debug });
     }
 
     /**
@@ -1564,8 +1632,8 @@ class ConceptManager {
                 }
                     
                 // Show links to all hubs if found and headerLevel is greater than 0
-                if (headerLevel > 0) {
-                    dv.header(headerLevel, "Related Hubs");
+                if (headerLevel > 0 && hubs.length > 0) {
+                    dv.header(headerLevel, `Related Hubs (${hubs.length})`);
                 }
                 
                 if (hubs.length > 0) {
@@ -1646,7 +1714,7 @@ class ConceptManager {
                     if (relatedGroups.length > 0) {
                         if (headerLevel > 0) {
                             const hubText = hubs.length === 1 ? "This Hub" : "These Hubs";
-                            dv.header(headerLevel + 1, `Other Groups in ${hubText}`);
+                            dv.header(headerLevel + 1, `Category Peers in ${hubText}`);
                         }
                         
                         // Get the first domain category to use as key column
@@ -1850,9 +1918,43 @@ class ConceptManager {
                 dv.paragraph("---");
             }
             
-            // Display a single top-level header before processing all group types
+            // Display a single wrapper header before processing all group types,
+            // with a dynamic count of total connections across all relation types.
+            // Only show if there is at least one connection.
             if (headerLevel > 0) {
-                dv.header(headerLevel, headerText || "Items in this Group");
+                let totalConnections = 0;
+                groupTypes.forEach(type => {
+                    const groupFieldName = `group-${type}`;
+                    const allMatchingPages = dv.pages()
+                        .where(p => {
+                            if (!p[groupFieldName]) return false;
+                            const pageValues = this.normalizeValues(p[groupFieldName]);
+                            return pageValues.some(val => 
+                                String(val).toLowerCase() === String(groupValue).toLowerCase()
+                            );
+                        });
+
+                    const pageMatching = this.filterPagesByValidSubjects({
+                        pages: Array.from(allMatchingPages),
+                        validSubjects: config.validSubjects,
+                        currentPagePath: currentPage.file.path,
+                        debug: false
+                    });
+
+                    const domainMatching = this.filterPagesByValidDomains({
+                        pages: pageMatching.filtered,
+                        validDomains: config.validDomains,
+                        currentPagePath: currentPage.file.path,
+                        debug: false
+                    });
+
+                    totalConnections += domainMatching.filtered.length;
+                });
+
+                if (totalConnections > 0) {
+                    const baseText = (headerText || 'Key Connections').replace(/\s*\(.*\)\s*$/, '');
+                    dv.header(headerLevel, `${baseText} (${totalConnections})`);
+                }
             }
             
             // Process each group type
@@ -1954,16 +2056,17 @@ class ConceptManager {
                     dv.paragraph("---");
                 }
                 
-                // Render per-category subheader one level deeper than top header
+                // Render per-category subheader one level deeper than wrapper header
                 if (headerLevel > 0) {
                     const subHeaderLevel = Math.min(6, headerLevel + 1);
-                    const displayName = this.getDisplayNameForCategory({
+                    const relationLabel = this.getRelationLabel({
                         dv,
                         domainCategory: type,
                         subject: currentPage.subject,
+                        direction: 'outgoing',
                         debug
                     });
-                    dv.header(subHeaderLevel, displayName);
+                    dv.header(subHeaderLevel, relationLabel);
                 }
                 
                 if (matchingPages.length > 0) {
@@ -1987,6 +2090,394 @@ class ConceptManager {
                 dv.paragraph(`Current page available fields: ${Object.keys(dv.current()).filter(k => k !== 'file' && typeof dv.current()[k] !== 'function').join(', ')}`);
             }
             dv.paragraph("Please check your parameters and try again.");
+        }
+    }
+
+    /**
+     * Helper: Discover relation types (group-* fields) for the current concept page
+     * Returns clean relation type names with "group-" prefix removed and filtered by validFilters
+     *
+     * @param {Object} params
+     * @param {Object} params.dv - The dataview API object
+     * @param {Array<string>|null} params.relationTypes - Optional override list of clean relation types
+     * @param {Array<string>} params.validFilters - The list of valid filter names from the config page
+     * @param {boolean} [params.debug=false] - Enable debug logging
+     * @returns {{ relationTypes: Array<string> }}
+     */
+    discoverRelationTypesForCurrentConcept({ dv, relationTypes, validFilters, debug = false }) {
+        const currentPage = dv.current();
+
+        if (relationTypes && relationTypes.length > 0) {
+            if (debug) {
+                dv.paragraph(`Using provided relationTypes override: [${relationTypes.join(', ')}]`);
+            }
+            return { relationTypes };
+        }
+
+        if (debug) {
+            dv.paragraph(`**Step 2: Determining relation types (group-* fields)**`);
+        }
+
+        // Get all group-* fields from current page
+        const allGroupFields = Object.keys(currentPage)
+            .filter(key => key.startsWith("group-"));
+
+        if (debug) {
+            dv.paragraph(`All group-* fields found: [${allGroupFields.join(', ')}]`);
+        }
+
+        // Convert to clean names and filter by valid filters from config
+        const discovered = allGroupFields
+            .map(key => key.replace('group-', ''))
+            .filter(cleanName => validFilters.includes(cleanName));
+
+        if (debug) {
+            dv.paragraph(`Filtered by valid_filters: [${discovered.join(', ')}]`);
+            if (discovered.length < allGroupFields.length) {
+                const ignored = allGroupFields
+                    .map(key => key.replace('group-', ''))
+                    .filter(cleanName => !validFilters.includes(cleanName));
+                dv.paragraph(`Ignored (not in valid_filters): [${ignored.join(', ')}]`);
+            }
+            dv.paragraph("---");
+        }
+
+        return { relationTypes: discovered };
+    }
+
+    /**
+     * Helper: Render the Classifications section for the provided relation types
+     * This corresponds to "Step 3!!!!" that displays organized sections per relation type
+     *
+     * @param {Object} params
+     * @param {Object} params.dv - The dataview API object
+     * @param {Array<string>} params.relationTypes - Clean relation type names (without "group-" prefix)
+     * @param {number} [params.headerLevel=2] - Header level to use
+     * @param {string} [params.subject] - Subject to use when resolving display names (defaults to current page's subject)
+     * @param {boolean} [params.debug=false] - Enable debug logging
+     */
+    renderConceptClassifications({ dv, relationTypes, headerLevel = 2, subject, debug = false }) {
+        const currentPage = dv.current();
+        const currentSubject = subject || currentPage.subject;
+
+        // Insert a single wrapper header "Classifications (n)" before any per-type sections
+        const presentTypes = relationTypes.filter(type => {
+            const currentValues = currentPage["group-" + type];
+            const normalized = this.normalizeValues(currentValues || [])
+                .map(v => String(v).trim())
+                .filter(v => v.length > 0);
+            return normalized.length > 0;
+        });
+
+        if (presentTypes.length > 0 && headerLevel > 0) {
+            dv.header(headerLevel, `Classifications (${presentTypes.length})`);
+        }
+
+        relationTypes.forEach((type, index) => {
+            if (debug) {
+                dv.paragraph(`**Step 3.${index + 1}: Processing relation type "${type}"**`);
+            }
+
+            const hubCategory = type.replace('group-', '');
+
+            if (debug) {
+                dv.paragraph(`Hub category to look for: "${hubCategory}"`);
+                dv.paragraph(`Looking for hub with: type="hub" AND domain-category="${hubCategory}"`);
+            }
+
+            const headerText = this.getDisplayNameForCategory({
+                dv,
+                domainCategory: hubCategory,
+                subject: currentSubject,
+                debug
+            });
+
+            if (debug) {
+                dv.paragraph(`🧭 Display name resolved for category "${hubCategory}": ${headerText}`);
+            }
+
+            const currentValues = currentPage["group-" + type] || [];
+            const normalizedValues = Array.isArray(currentValues) ? currentValues : [currentValues];
+
+            if (debug) {
+                dv.paragraph(`**🔍 HEADER DECISION POINT FOR "${type}":**`);
+                dv.paragraph(`  • Current page has values: ${currentValues.length > 0 ? 'YES' : 'NO'}`);
+                dv.paragraph(`  • Values: [${normalizedValues.join(', ')}]`);
+                dv.paragraph(`  • Header text would be: "${headerText}"`);
+            }
+
+            if (normalizedValues.length === 0 || (normalizedValues.length === 1 && normalizedValues[0] === '')) {
+                if (debug) {
+                    dv.paragraph(`**❌ SKIPPING HEADER AND SECTION - No values found for "${type}"**`);
+                    dv.paragraph("---");
+                }
+                return;
+            }
+
+            if (debug) {
+                dv.paragraph(`**✅ PRINTING SUBHEADER because we have ${normalizedValues.length} values to process**`);
+            }
+
+            const subHeaderLevel = Math.min(6, headerLevel + 1);
+            dv.header(subHeaderLevel, headerText);
+
+            if (debug) {
+                dv.paragraph(`**Values for ${type}: [${normalizedValues.join(', ')}]**`);
+                dv.paragraph(`Will create links for each value by searching for pages with file.name matching the value AND domain="concepts" or "patterns"`);
+            }
+
+            // STEP 1: Collect all matching data first
+            const matchResults = normalizedValues.map(value => {
+                const matchingPages = dv.pages()
+                    .where(p => String(p.file.name) === String(value) &&
+                        (p.domain === "concepts" || p.domain === "patterns"));
+                return { value, matchingPages };
+            });
+
+            // STEP 2: Process results and handle multiple matches
+            const processedResults = matchResults.map(({ value, matchingPages }) => {
+                if (matchingPages.length === 0) {
+                    return { value, link: value, status: 'no_match' };
+                } else if (matchingPages.length === 1) {
+                    const match = matchingPages[0];
+                    return {
+                        value,
+                        link: `[[${match.file.path}|${value}]]`,
+                        status: 'single_match',
+                        matchPath: match.file.path
+                    };
+                } else {
+                    const match = matchingPages[0];
+                    return {
+                        value,
+                        link: `[[${match.file.path}|${value}]]`,
+                        status: 'multiple_matches',
+                        count: matchingPages.length,
+                        matchPath: match.file.path,
+                        allMatches: matchingPages.map(p => p.file.name)
+                    };
+                }
+            });
+
+            if (debug) {
+                const summary = processedResults.reduce((acc, result) => {
+                    acc[result.status] = (acc[result.status] || 0) + 1;
+                    return acc;
+                }, {});
+                dv.paragraph(`**${type} Link Summary:** ${summary.single_match || 0} exact matches, ${summary.multiple_matches || 0} ambiguous matches, ${summary.no_match || 0} unmatched`);
+                if (summary.multiple_matches > 0) {
+                    dv.paragraph(`⚠️ Warning: ${summary.multiple_matches} values had multiple matches - using first match found`);
+                    processedResults.filter(r => r.status === 'multiple_matches').forEach(result => {
+                        dv.paragraph(`  • "${result.value}" → ${result.count} matches: [${result.allMatches.join(', ')}] → using: ${result.matchPath}`);
+                    });
+                }
+                if (summary.no_match > 0) {
+                    processedResults.filter(r => r.status === 'no_match').forEach(result => {
+                        dv.paragraph(`  • "${result.value}" → No Group (Concept/Core Pattern) page found (searching for: file.name="${result.value}" AND domain="concepts" or "patterns")`);
+                    });
+                }
+            }
+
+            const hasAnyMatches = processedResults.some(result => result.status !== 'no_match');
+
+            if (debug) {
+                dv.paragraph(`**🎯 FINAL OUTPUT DECISION:**`);
+                dv.paragraph(`  • Total values processed: ${processedResults.length}`);
+                dv.paragraph(`  • Values with matches: ${processedResults.filter(r => r.status !== 'no_match').length}`);
+                dv.paragraph(`  • Will show: ${hasAnyMatches ? 'LIST OF LINKS' : 'NO MATCHES MESSAGE'}`);
+            }
+
+            if (hasAnyMatches) {
+                dv.list(processedResults.map(result => result.link));
+            } else {
+                dv.paragraph(`*No matching pages found for any ${type.replace('group-', '')} values. Please ensure there are pages with matching file names and domain="concepts" or "patterns".*`);
+            }
+
+            if (debug) {
+                dv.paragraph("---");
+            }
+        });
+    }
+
+    /**
+     * Helper: Render Key Connections for a concept page.
+     * For each relation type, finds pages where group-<type> matches current page name.
+     * Skips empty categories and prints a single total in the wrapper header.
+     *
+     * @param {Object} params
+     * @param {Object} params.dv - The dataview API object
+     * @param {Array<string>} params.relationTypes - Clean relation type names (without "group-" prefix)
+     * @param {number} [params.headerLevel=2] - Header level to use
+     * @param {boolean} [params.debug=false] - Enable debug logging
+     */
+    renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel = 2, debug = false }) {
+        const currentPage = dv.current();
+        const currentSubject = currentPage.subject;
+        const groupValue = currentPage.file.name;
+
+        const config = this.getConfigForSubject({ dv, subject: currentSubject, debug: false });
+
+        // Compute total connections after subject/domain validation
+        let totalConnections = 0;
+        (relationTypes || []).forEach(type => {
+            const groupFieldName = `group-${type}`;
+            const allMatchingPages = dv.pages().where(p => {
+                if (!p[groupFieldName]) return false;
+                const pageValues = this.normalizeValues(p[groupFieldName]);
+                return pageValues.some(val => String(val).toLowerCase() === String(groupValue).toLowerCase());
+            });
+
+            const pageMatching = this.filterPagesByValidSubjects({
+                pages: Array.from(allMatchingPages),
+                validSubjects: config.validSubjects,
+                currentPagePath: currentPage.file.path,
+                debug: false
+            });
+
+            const domainMatching = this.filterPagesByValidDomains({
+                pages: pageMatching.filtered,
+                validDomains: config.validDomains,
+                currentPagePath: currentPage.file.path,
+                debug: false
+            });
+
+            totalConnections += domainMatching.filtered.length;
+        });
+
+        if (totalConnections > 0 && headerLevel > 0) {
+            dv.header(headerLevel, `Key Connections (${totalConnections})`);
+        }
+
+        // Render only non-empty categories
+        (relationTypes || []).forEach(type => {
+            const groupFieldName = `group-${type}`;
+
+            const allMatchingPages = dv.pages().where(p => {
+                if (!p[groupFieldName]) return false;
+                const pageValues = this.normalizeValues(p[groupFieldName]);
+                return pageValues.some(val => String(val).toLowerCase() === String(groupValue).toLowerCase());
+            });
+
+            const pageMatching = this.filterPagesByValidSubjects({
+                pages: Array.from(allMatchingPages),
+                validSubjects: config.validSubjects,
+                currentPagePath: currentPage.file.path,
+                debug
+            });
+
+            const domainMatching = this.filterPagesByValidDomains({
+                pages: pageMatching.filtered,
+                validDomains: config.validDomains,
+                currentPagePath: currentPage.file.path,
+                debug
+            });
+
+            const matchingPages = domainMatching.filtered.sort(p => p.file.name);
+            if (matchingPages.length === 0) return; // skip empty
+
+            const relationLabel = this.getRelationLabel({
+                dv,
+                domainCategory: type,
+                subject: currentSubject,
+                direction: 'outgoing',
+                debug
+            });
+
+            const subHeaderLevel = Math.min(6, headerLevel + 1);
+            dv.header(subHeaderLevel, relationLabel);
+
+            const listItems = matchingPages.map(page => {
+                const title = page.file.name;
+                const summary = page.summary || "";
+                return `**[[${page.file.path}|${title}]]** - ${summary}`;
+            });
+            dv.list(listItems);
+        });
+    }
+
+    /**
+     * Helper: Render the Top Related Content table based on current page and relationTypes
+     * This corresponds to what was previously Step 4 inside generateConceptsAnalysis
+     *
+     * @param {Object} params
+     * @param {Object} params.dv - The dataview API object
+     * @param {Array<string>} params.relationTypes - Clean relation type names (without "group-" prefix)
+     * @param {Array<string>} [params.validSubjects] - Optional list of valid subjects to filter related concepts by
+     * @param {number} [params.headerLevel=2] - Header level to use
+     * @param {boolean} [params.debug=false] - Enable debug logging
+     */
+    renderTopRelatedContent({ dv, relationTypes, validSubjects, headerLevel = 2, debug = false }) {
+        const currentPage = dv.current();
+        const currentSubject = currentPage.subject;
+
+        // Default validSubjects to current subject if not provided
+        const subjectsToUse = (validSubjects && validSubjects.length > 0) ? validSubjects : [currentSubject];
+
+        if (debug) {
+            dv.paragraph(`**Step 4: Finding related concepts**`);
+            dv.paragraph(`Using getRelatedConcepts with relationTypes: [${(relationTypes || []).join(', ')}]`);
+            dv.paragraph(`Subject filter: ${subjectsToUse.join(', ')}`);
+        }
+
+        // Build match criteria from current page's group-* fields and domain-category
+        const matchCriteria = {};
+
+        if (currentPage["domain-category"]) {
+            matchCriteria["domain-category"] = true;
+        }
+
+        (relationTypes || []).forEach(type => {
+            const groupFieldName = `group-${type}`;
+            const values = currentPage[groupFieldName];
+            if (values) {
+                matchCriteria[groupFieldName] = true;
+            }
+        });
+
+        if (debug) {
+            dv.paragraph(`**Building Match Criteria for getRelatedConcepts:**`);
+            dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? 'included' : 'not present'}`);
+            dv.paragraph(`  • group-* fields from current page:`);
+            (relationTypes || []).forEach(type => {
+                const groupFieldName = `group-${type}`;
+                const values = currentPage[groupFieldName];
+                dv.paragraph(`    - ${groupFieldName}: ${values ? `"${Array.isArray(values) ? values.join(', ') : values}"` : 'not present'}`);
+            });
+            dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
+        }
+
+        const related = this.getRelatedConcepts({
+            dv,
+            matchCriteria,
+            debug
+        });
+
+        const filteredResults = related
+            .filter(r => r.concept.file.path !== currentPage.file.path)
+            .filter(r => subjectsToUse.includes(r.concept.subject))
+            .sort((a, b) => b.confidence - a.confidence);
+
+        if (debug) {
+            dv.paragraph(`**Related "CONCEPTS" found: ${related.length}**`);
+            dv.paragraph(`**After filtering by subject: ${filteredResults.length}**`);
+            dv.paragraph(`**Valid subjects: [${subjectsToUse.join(', ')}]**`);
+            dv.paragraph("---");
+        }
+
+        // Display related concepts section
+        dv.header(headerLevel, "Top Related Content");
+
+        if (filteredResults.length === 0) {
+            dv.paragraph("No related \"CONCEPTS\" found.");
+        } else {
+            dv.table(["Name", "Type", "Domain", "Confidence"],
+                filteredResults.map(r => [
+                    dv.fileLink(r.concept.file.path, false, r.concept.file.name),
+                    r.concept.type || "",
+                    r.concept.domain || "",
+                    `${r.confidence.toFixed(1)}%`
+                ])
+            );
         }
     }
 
@@ -2079,40 +2570,19 @@ class ConceptManager {
                 validSubjects = [currentSubject];
             }
 
-            // STEP 2: Get relation types (group-* fields)
-            if (debug) {
-                dv.paragraph(`**Step 2: Determining relation types (group-* fields)**`);
-            }
-            
-            if (!relationTypes) {
-                // Get all group-* fields from current page
-                const allGroupFields = Object.keys(currentPage)
-                    .filter(key => key.startsWith("group-"));
-                    
-                if (debug) {
-                    dv.paragraph(`All group-* fields found: [${allGroupFields.join(', ')}]`);
-                }
-                
-                // Filter them to only include valid ones from config
-                relationTypes = allGroupFields.filter(key => {
-                    // Strip "group-" prefix and compare against clean validFilters
-                    const filterName = key.replace('group-', '');
-                    return validFilters.includes(filterName);
-                });
-                
-                if (debug) {
-                    dv.paragraph(`Filtered by valid_filters: [${relationTypes.join(', ')}]`);
-                    if (relationTypes.length < allGroupFields.length) {
-                        const filtered = allGroupFields.filter(key => {
-                            // Strip "group-" prefix and compare against clean validFilters
-                            const filterName = key.replace('group-', '');
-                            return !validFilters.includes(filterName);
-                        });
-                        dv.paragraph(`Ignored (not in valid_filters): [${filtered.join(', ')}]`);
-                    }
-                }
-            }
-            
+            // NOTE: Classifications wrapper header is inserted just before rendering sections below (Step 3)
+
+            // Reordered: Classifications → Key Connections → Top Related Content
+
+            // STEP 2: Discover relation types (group-* fields)
+            const discovery = this.discoverRelationTypesForCurrentConcept({
+                dv,
+                relationTypes,
+                validFilters,
+                debug
+            });
+            relationTypes = discovery.relationTypes;
+
             if (debug) {
                 dv.paragraph(`**Final relation types to process: [${relationTypes.join(', ')}]**`);
                 dv.paragraph("---");
@@ -2130,214 +2600,32 @@ class ConceptManager {
             }
 
             // STEP 3: Display organized sections for each type of relation
-            relationTypes.forEach((type, index) => {
-                if (debug) {
-                    dv.paragraph(`**Step 3.${index + 1}: Processing relation type "${type}"**`);
-                }
-                
-                // Strip "group-" prefix to match hub's domain-category
-                const hubCategory = type.replace('group-', '');
-                
-                if (debug) {
-                    dv.paragraph(`Hub category to look for: "${hubCategory}"`);
-                    dv.paragraph(`Looking for hub with: type="hub" AND domain-category="${hubCategory}"`);
-                }
-                
-                // Resolve a user-friendly display name for this category via helper
-                const headerText = this.getDisplayNameForCategory({
-                    dv,
-                    domainCategory: hubCategory,
-                    subject: currentSubject,
-                    debug
-                });
-                
-                if (debug) {
-                    dv.paragraph(`🧭 Display name resolved for category "${hubCategory}": ${headerText}`);
-                }
-
-                const currentValues = currentPage["group-" + type] || [];
-                // Ensure currentValues is an array
-                const normalizedValues = Array.isArray(currentValues) ? currentValues : [currentValues];
-                
-                if (debug) {
-                    dv.paragraph(`**🔍 HEADER DECISION POINT FOR "${type}":**`);
-                    dv.paragraph(`  • Current page has values: ${currentValues.length > 0 ? 'YES' : 'NO'}`);
-                    dv.paragraph(`  • Values: [${normalizedValues.join(', ')}]`);
-                    dv.paragraph(`  • Header text would be: "${headerText}"`);
-                }
-
-                // CHECK IF WE HAVE ANY VALUES TO PROCESS
-                if (normalizedValues.length === 0 || (normalizedValues.length === 1 && normalizedValues[0] === '')) {
-                    if (debug) {
-                        dv.paragraph(`**❌ SKIPPING HEADER AND SECTION - No values found for "${type}"**`);
-                        dv.paragraph("---");
-                    }
-                    return; // Skip this entire section - no values to process
-                }
-
-                // WE HAVE VALUES - PRINT THE HEADER
-                if (debug) {
-                    dv.paragraph(`**✅ PRINTING HEADER because we have ${normalizedValues.length} values to process**`);
-                }
-                
-                dv.header(headerLevel, headerText);
-                
-                if (debug) {
-                    dv.paragraph(`**Values for ${type}: [${normalizedValues.join(', ')}]**`);
-                    dv.paragraph(`Will create links for each value by searching for pages with file.name matching the value AND domain="concepts" or "patterns"`);
-                }
-
-                // STEP 1: Collect all matching data first
-                const matchResults = normalizedValues.map(value => {
-                    const matchingPages = dv.pages()
-                        .where(p => String(p.file.name) === String(value) && 
-                            (p.domain === "concepts" || p.domain === "patterns"));
-                    
-                    return { value, matchingPages };
-                });
-
-                // STEP 2: Process results and handle multiple matches
-                const processedResults = matchResults.map(({ value, matchingPages }) => {
-                    if (matchingPages.length === 0) {
-                        return { value, link: value, status: 'no_match' };
-                    } else if (matchingPages.length === 1) {
-                        const match = matchingPages[0];
-                        return { 
-                            value, 
-                            link: `[[${match.file.path}|${value}]]`, 
-                            status: 'single_match',
-                            matchPath: match.file.path
-                        };
-                    } else {
-                        // Multiple matches - take first but flag as ambiguous
-                        const match = matchingPages[0];
-                        return { 
-                            value, 
-                            link: `[[${match.file.path}|${value}]]`, 
-                            status: 'multiple_matches',
-                            count: matchingPages.length,
-                            matchPath: match.file.path,
-                            allMatches: matchingPages.map(p => p.file.name)
-                        };
-                    }
-                });
-
-                // STEP 3: Provide meaningful debug summary
-                if (debug) {
-                    const summary = processedResults.reduce((acc, result) => {
-                        acc[result.status] = (acc[result.status] || 0) + 1;
-                        return acc;
-                    }, {});
-                    
-                    dv.paragraph(`**${type} Link Summary:** ${summary.single_match || 0} exact matches, ${summary.multiple_matches || 0} ambiguous matches, ${summary.no_match || 0} unmatched`);
-                    
-                    if (summary.multiple_matches > 0) {
-                        dv.paragraph(`⚠️ Warning: ${summary.multiple_matches} values had multiple matches - using first match found`);
-                        processedResults.filter(r => r.status === 'multiple_matches').forEach(result => {
-                            dv.paragraph(`  • "${result.value}" → ${result.count} matches: [${result.allMatches.join(', ')}] → using: ${result.matchPath}`);
-                        });
-                    }
-                    
-                    if (summary.no_match > 0) {
-                        processedResults.filter(r => r.status === 'no_match').forEach(result => {
-                            dv.paragraph(`  • "${result.value}" → No Group (Concept/Core Pattern) page found (searching for: file.name="${result.value}" AND domain="concepts" or "patterns")`);
-                        });
-                    }
-                }
-
-                // STEP 4: Generate the actual list OR show "no matches" message
-                const hasAnyMatches = processedResults.some(result => result.status !== 'no_match');
-                
-                if (debug) {
-                    dv.paragraph(`**🎯 FINAL OUTPUT DECISION:**`);
-                    dv.paragraph(`  • Total values processed: ${processedResults.length}`);
-                    dv.paragraph(`  • Values with matches: ${processedResults.filter(r => r.status !== 'no_match').length}`);
-                    dv.paragraph(`  • Will show: ${hasAnyMatches ? 'LIST OF LINKS' : 'NO MATCHES MESSAGE'}`);
-                }
-                
-                if (hasAnyMatches) {
-                    // WE HAVE MATCHES - SHOW THE LIST
-                    dv.list(processedResults.map(result => result.link));
-                } else {
-                    // NO MATCHES FOUND - SHOW MESSAGE
-                    dv.paragraph(`*No matching pages found for any ${type.replace('group-', '')} values. Please ensure there are pages with matching file names and domain="concepts" or "patterns".*`);
-                }
-                
-                if (debug) {
-                    dv.paragraph("---");
-                }
+            this.renderConceptClassifications({
+                dv,
+                relationTypes,
+                headerLevel,
+                subject: currentSubject,
+                debug
             });
 
-            // STEP 4: Get and process related concepts
-            if (debug) {
-                dv.paragraph(`**Step 4: Finding related concepts**`);
-                dv.paragraph(`Using getRelatedConcepts with relationTypes: [${relationTypes.join(', ')}]`);
-                dv.paragraph(`Subject filter: ${currentSubject}`);
-            }
-            
-            // Build match criteria from current page's group-* fields and domain-category
-            const matchCriteria = {};
-            
-            // Include domain-category if present
-            if (currentPage["domain-category"]) {
-                matchCriteria["domain-category"] = true;
-            }
-            
-            // Convert clean relation types to group-* field names and include if present
-            relationTypes.forEach(type => {
-                const groupFieldName = `group-${type}`;
-                const values = currentPage[groupFieldName];
-                if (values) {
-                    matchCriteria[groupFieldName] = true; // Use current page's value
-                }
-            });
-            
-            if (debug) {
-                dv.paragraph(`**Building Match Criteria for getRelatedConcepts:**`);
-                dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? 'included' : 'not present'}`);
-                dv.paragraph(`  • group-* fields from current page:`);
-                relationTypes.forEach(type => {
-                    const groupFieldName = `group-${type}`;
-                    const values = currentPage[groupFieldName];
-                    dv.paragraph(`    - ${groupFieldName}: ${values ? `"${Array.isArray(values) ? values.join(', ') : values}"` : 'not present'}`);
-                });
-                dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
-            }
-            
-            const related = this.getRelatedConcepts({ 
-                dv, 
-                matchCriteria,
-                debug: debug
+            // STEP 3.5: Key Connections (inserted between classifications and top related)
+            this.renderKeyConnectionsForConcept({
+                dv,
+                relationTypes,
+                headerLevel,
+                debug
             });
 
-            // Filter results to include only concepts with subjects in validSubjects
-            const filteredResults = related
-                .filter(r => r.concept.file.path !== currentPage.file.path)
-                .filter(r => validSubjects.includes(r.concept.subject))
-                .sort((a, b) => b.confidence - a.confidence);
+            // End of reorder block
 
-            if (debug) {
-                dv.paragraph(`**Related "CONCEPTS" found: ${related.length}**`);
-                dv.paragraph(`**After filtering by subject: ${filteredResults.length}**`);
-                dv.paragraph(`**Valid subjects: [${validSubjects.join(', ')}]**`);
-                dv.paragraph("---");
-            }
-
-            // Display related concepts section
-            dv.header(headerLevel, "Related Content");
-
-            if (filteredResults.length === 0) {
-                dv.paragraph("No related \"CONCEPTS\" found.");
-            } else {
-                dv.table(["Name", "Type", "Domain", "Confidence"], 
-                    filteredResults.map(r => [
-                        dv.fileLink(r.concept.file.path, false, r.concept.file.name),
-                        r.concept.type || "",
-                        r.concept.domain || "",  
-                        `${r.confidence.toFixed(1)}%`
-                    ])
-                );
-            }
+            // STEP 4: Top Related Content - now delegated to helper
+            this.renderTopRelatedContent({
+                dv,
+                relationTypes,
+                validSubjects,
+                headerLevel,
+                debug
+            });
         } catch (error) {
             dv.header(headerLevel, "⚠️ Error Loading Content");
             dv.paragraph(`**Error:** ${error.message}`);
@@ -2402,6 +2690,8 @@ class ConceptManager {
                 dv.paragraph("---");
             }
 
+            dv.paragraph("step 1");
+
             // Step 1: Get current page and basic analysis
             const currentPage = dv.current();
             
@@ -2420,6 +2710,8 @@ class ConceptManager {
                 dv.paragraph("---");
             }
             
+            dv.paragraph("step hjkhjhj");
+
             // Step 2: Look for config file
             if (debug) {
                 dv.paragraph(`**Step 2: Looking for Configuration**`);
@@ -2447,6 +2739,8 @@ class ConceptManager {
             }
 
             let viewsGenerated = 0;
+
+            dv.paragraph("step yyuyuuyuyuy");
             
             // Step 3: Check if we should run concept analysis
             const stepEnabled = enabledSteps.includes('conceptAnalysis');
@@ -2496,17 +2790,22 @@ class ConceptManager {
                 }
             }
                         
+            dv.paragraph("step xyz");
+
+
             // Step 4: Check if we should run Group (Concept/Core Pattern) items list
             const step4Enabled = enabledSteps.includes('groupItems');
             const hasDomainCategory = !!currentPage["domain-category"];
-            const shouldRunGroupItems = step4Enabled && hasDomainCategory;
+            // Avoid duplicating Key Connections if Concept Analysis already rendered them
+            const shouldRunGroupItems = step4Enabled && hasDomainCategory && !shouldRunConceptAnalysis;
             
             if (debug) {
                 dv.paragraph(`**Step 4: Group (Concept/Core Pattern) Items List Check**`);
                 dv.paragraph(`Step enabled: ${step4Enabled ? "Yes" : "No"}`);
                 dv.paragraph(`Has domain-category: ${hasDomainCategory ? "Yes" : "No"}`);
+                dv.paragraph(`Concept Analysis already ran: ${shouldRunConceptAnalysis ? "Yes" : "No"}`);
                 dv.paragraph(`Should run Group (Concept/Core Pattern) items list: ${shouldRunGroupItems ? "Yes" : "No"}`);
-                dv.paragraph(`Reasoning: ${!step4Enabled ? "Step disabled by enabledSteps parameter" : !hasDomainCategory ? "No domain-category found in frontmatter" : "All requirements met"}`);
+                dv.paragraph(`Reasoning: ${!step4Enabled ? "Step disabled by enabledSteps parameter" : !hasDomainCategory ? "No domain-category found in frontmatter" : shouldRunConceptAnalysis ? "Already rendered inside Concept Analysis (avoiding duplicate Key Connections)" : "All requirements met"}`);
             }
 
             if (shouldRunGroupItems) {
@@ -2526,7 +2825,7 @@ class ConceptManager {
                 //     }
                 // }
 
-                let headerText = `Direct Relationships`; // Content related to ${currentPage.file.name}
+                let headerText = `Key Connections (n)`; // Content related to ${currentPage.file.name}
                 
                 if (debug) {
                     dv.paragraph(`Final header text: ${headerText}`);
@@ -2549,10 +2848,13 @@ class ConceptManager {
                 }
             } else {
                 if (debug) {
-                    dv.paragraph(`❌ Skipping Group (Concept/Core Pattern) items list - ${!step4Enabled ? "step disabled by user" : "no domain-category found"}`);
+                    const reason = !step4Enabled ? "step disabled by user" : !hasDomainCategory ? "no domain-category found" : "already rendered inside Concept Analysis";
+                    dv.paragraph(`❌ Skipping Group (Concept/Core Pattern) items list - ${reason}`);
                     dv.paragraph("---");
                 }
             }
+
+            dv.paragraph("step zxcv");
             
             // Step 5: Check if we should run view table (group relationships)
             const step5Enabled = enabledSteps.includes('viewTable');
@@ -2625,13 +2927,16 @@ class ConceptManager {
                     dv.paragraph(`   ✅ **EXECUTED** - All requirements met`);
                     dv.paragraph(`   📋 Step enabled: ${step4Enabled}, Has domain-category: ${hasDomainCategory}`);
                 } else {
-                    dv.paragraph(`   ❌ **SKIPPED** - ${!step4Enabled ? "Step disabled by user" : "Missing domain-category field"}`);
+                    const skippedReason = !step4Enabled ? "Step disabled by user" : !hasDomainCategory ? "Missing domain-category field" : "Rendered inside Concept Analysis (avoided duplicate)";
+                    dv.paragraph(`   ❌ **SKIPPED** - ${skippedReason}`);
                     if (!step4Enabled) {
                         dv.paragraph(`   📋 Reason: 'groupItems' not in enabledSteps parameter`);
                         dv.paragraph(`   🔧 Fix: Add 'groupItems' to enabledSteps array`);
-                    } else {
+                    } else if (!hasDomainCategory) {
                         dv.paragraph(`   📋 Reason: Page does not have "domain-category" in frontmatter`);
                         dv.paragraph(`   🔧 Fix: Add "domain-category: [category-name]" to frontmatter`);
+                    } else {
+                        dv.paragraph(`   📋 Reason: Concept Analysis was executed and already rendered Key Connections`);
                     }
                 }
                 
