@@ -1850,11 +1850,9 @@ class ConceptManager {
                 dv.paragraph("---");
             }
             
-            dv.paragraph("asdf");
-            
-            // Display header once before processing all group types
-            if (headerLevel > 0 && headerText) {
-                dv.header(headerLevel, headerText);
+            // Display a single top-level header before processing all group types
+            if (headerLevel > 0) {
+                dv.header(headerLevel, headerText || "Items in this Group");
             }
             
             // Process each group type
@@ -1863,10 +1861,7 @@ class ConceptManager {
                     dv.paragraph(`**Step 3.${index + 1}: Processing Group (Concept/Core Pattern) type "${type}"**`);
                 }
                 
-                // // Default header text if not provided (use custom text for first item only if multiple types)
-                // const displayHeaderText = index === 0 && headerText ? 
-                //     headerText : 
-                //     `index === 0 && headerText Items in this Group (${type}): ${groupValue}`;
+                // // Default header text if not provided (previous noisy header removed by design)
                 
                 // Use the normalized group field name (e.g., "group-year" for year pages)
                 const groupFieldName = `group-${type}`;
@@ -1959,12 +1954,16 @@ class ConceptManager {
                     dv.paragraph("---");
                 }
                 
-                dv.paragraph("zxcv");
-
-                // Only render header if headerLevel > 0
+                // Render per-category subheader one level deeper than top header
                 if (headerLevel > 0) {
-                    const typeSpecificHeaderText = `Items in this Group (Concept/Core Pattern) ${type}: ${groupValue}`;
-                    dv.header(headerLevel, typeSpecificHeaderText);
+                    const subHeaderLevel = Math.min(6, headerLevel + 1);
+                    const displayName = this.getDisplayNameForCategory({
+                        dv,
+                        domainCategory: type,
+                        subject: currentPage.subject,
+                        debug
+                    });
+                    dv.header(subHeaderLevel, displayName);
                 }
                 
                 if (matchingPages.length > 0) {
@@ -2420,8 +2419,6 @@ class ConceptManager {
                 }
                 dv.paragraph("---");
             }
-
-            dv.paragraph("step 2");
             
             // Step 2: Look for config file
             if (debug) {
@@ -2450,8 +2447,6 @@ class ConceptManager {
             }
 
             let viewsGenerated = 0;
-
-            dv.paragraph("step 3");
             
             // Step 3: Check if we should run concept analysis
             const stepEnabled = enabledSteps.includes('conceptAnalysis');
@@ -2500,9 +2495,7 @@ class ConceptManager {
                     dv.paragraph("---");
                 }
             }
-            
-            dv.paragraph("step 4");
-            
+                        
             // Step 4: Check if we should run Group (Concept/Core Pattern) items list
             const step4Enabled = enabledSteps.includes('groupItems');
             const hasDomainCategory = !!currentPage["domain-category"];
@@ -2533,7 +2526,7 @@ class ConceptManager {
                 //     }
                 // }
 
-                let headerText = `Items in this Group (Concept/Core Pattern) ${currentPage["domain-category"]}: ${currentPage.file.name}`;
+                let headerText = `Direct Relationships`; // Content related to ${currentPage.file.name}
                 
                 if (debug) {
                     dv.paragraph(`Final header text: ${headerText}`);
@@ -2561,8 +2554,6 @@ class ConceptManager {
                 }
             }
             
-            dv.paragraph("step 5");
-
             // Step 5: Check if we should run view table (group relationships)
             const step5Enabled = enabledSteps.includes('viewTable');
             const hasDomainCategoryForTable = !!currentPage["domain-category"];
