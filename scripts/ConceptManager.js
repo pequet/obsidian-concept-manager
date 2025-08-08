@@ -1456,10 +1456,17 @@ class ConceptManager {
                 }
                 
                 // This is a Hub page - show all related Groups (Concept/Core Pattern)
-                
-                // Add header if headerLevel is greater than 0
+
+                // Adaptive header: "<Category Name> in this Hub" (e.g., "Movies in this Hub")
                 if (headerLevel > 0) {
-                    dv.header(headerLevel, "Groups (Concepts/Core Patterns) in this Hub");
+                    const hubCategory = (domainCategoryKeys && domainCategoryKeys.length > 0) ? domainCategoryKeys[0] : null;
+                    const hubCategoryName = hubCategory ? this.getDisplayNameForCategory({
+                        dv,
+                        domainCategory: hubCategory,
+                        subject: currentPage.subject,
+                        debug: false
+                    }) : "Items";
+                    dv.header(headerLevel, `${hubCategoryName} in this Hub`);
                 }
 
                 // Get related pages - match any page that has at least one matching domain category
@@ -1518,50 +1525,102 @@ class ConceptManager {
                 }
 
                 if (pages.length > 0) {
-                    // Get the first domain category to use as key column
-                    const categoryKey = domainCategoryKeys.length > 0 ? domainCategoryKeys[0] : null;
-                    
-                    // Check if any page has a value for this category key
-                    const anyPageHasKeyValue = categoryKey && Array.from(pages).some(p => p[categoryKey]);
-                    
-                    if (debug) {
-                        dv.paragraph(`**Step 3: Building table display**`);
-                        dv.paragraph(`Category key for table: ${categoryKey || 'none'}`);
-                        dv.paragraph(`Any page has key value: ${anyPageHasKeyValue}`);
-                    }
-                    
-                    if (categoryKey && anyPageHasKeyValue) {
-                        // Create an array from the pages collection for sorting
-                        const pagesArray = Array.from(pages);
-                        
-                        // Sort the array by the key value
-                        pagesArray.sort((a, b) => {
-                            const aValue = a[categoryKey] || "";
-                            const bValue = b[categoryKey] || "";
-                            return aValue.localeCompare(bValue);
+                    // Build an adaptive table: Name + Summary + optional Subject + top N metadata columns (from group-* fields)
+                    const pagesArray = Array.from(pages);
+
+                    // Determine candidate group-* fields from config.valid_filters
+                    const validFilters = Array.isArray(config.validFilters) ? config.validFilters : [];
+                    const candidateFields = validFilters
+                        .map(filterName => {
+                            const fieldName = `group-${filterName}`;
+                            const coverage = pagesArray.reduce((count, pg) => count + (pg[fieldName] ? 1 : 0), 0);
+                            return { filterName, fieldName, coverage };
+                        })
+                        .filter(c => c.coverage > 0);
+
+                    // Sort by how many pages have the field (descending)
+                    candidateFields.sort((a, b) => b.coverage - a.coverage);
+
+                    // Select top N columns to display (keep concise)
+                    const maxColumns = 3;
+                    const selected = candidateFields.slice(0, maxColumns);
+
+                    // Resolve human-friendly column headers
+                    const columnHeaders = selected.map(c => this.getDisplayNameForCategory({
+                        dv,
+                        domainCategory: c.filterName,
+                        subject: currentPage.subject,
+                        debug: false
+                    }));
+
+                    // Helper: Linkify a single value to a page if possible, preferring pages whose domain-category includes the filter
+                    const toWikiLink = (path, name) => `[[${path}|${name}]]`;
+                    const linkifyValue = (filterName, rawValue) => {
+                        const valueString = String(rawValue).trim();
+                        // Find pages matching the value by file name (case-insensitive)
+                        const byName = dv.pages().where(p => p.file && p.file.name && String(p.file.name).toLowerCase() === valueString.toLowerCase());
+                        // Fallback: match by aliases if available
+                        const byAlias = dv.pages().where(p => Array.isArray(p.aliases) && p.aliases.some(a => String(a).toLowerCase() === valueString.toLowerCase()));
+                        let candidates = Array.from(byName || []).concat(Array.from(byAlias || []));
+                        // Filter by valid subjects (if configured)
+                        if (Array.isArray(config.validSubjects) && config.validSubjects.length > 0) {
+                            candidates = candidates.filter(p => config.validSubjects.includes(p.subject));
+                        }
+                        // Prefer pages whose domain-category includes this filter
+                        const preferred = candidates.find(p => {
+                            if (!p["domain-category"]) return false;
+                            const cats = this.normalizeValues(p["domain-category"]);
+                            return cats.includes(filterName);
                         });
-                        
-                        // Create table with the Key column
-                        dv.table(
-                            ["Key", "Name", "Summary"],
-                            pagesArray.map(p => [
-                                p[categoryKey] || "", // Display the value of the key that matches the first domain category
+                        const chosen = preferred || candidates[0];
+                        if (chosen && chosen.file) {
+                            return toWikiLink(chosen.file.path, chosen.file.name);
+                        }
+                        return valueString;
+                    };
+
+                    // Prefer sorting by release year if present, else by name
+                    const yearField = selected.find(c => c.filterName === 'release-year')?.fieldName || null;
+                    const sortedPages = [...pagesArray].sort((a, b) => {
+                        if (yearField) {
+                            const ayRaw = Array.isArray(a[yearField]) ? a[yearField][0] : a[yearField];
+                            const byRaw = Array.isArray(b[yearField]) ? b[yearField][0] : b[yearField];
+                            const ay = parseInt(ayRaw, 10) || 0;
+                            const by = parseInt(byRaw, 10) || 0;
+                            return ay - by;
+                        }
+                        return a.file.name.localeCompare(b.file.name);
+                    });
+
+                    // If multiple subjects are present, include a Subject column
+                    const uniqueSubjects = Array.from(new Set(pagesArray.map(p => p.subject).filter(Boolean)));
+                    const includeSubjectColumn = uniqueSubjects.length > 1;
+
+                    // Render adaptive table
+                    dv.table(
+                        ["Name", "Summary", ...(includeSubjectColumn ? ["Subject"] : []), ...columnHeaders],
+                        sortedPages.map(p => {
+                            const values = selected.map(sel => {
+                                const val = p[sel.fieldName];
+                                if (!val) return "-";
+                                const items = this.normalizeValues(val).map(v => linkifyValue(sel.filterName, v));
+                                if (items.length === 0) return "-";
+                                if (items.length > 3) {
+                                    return `${items.slice(0, 3).join(', ')} (+${items.length - 3})`;
+                                }
+                                return items.join(', ');
+                            });
+                            return [
                                 p.file.link,
-                                p.summary
-                            ])
-                        );
-                    } else {
-                        // Fallback to original behavior if no domain categories or no pages have values for the key
-                        const pagesArray = Array.from(pages);
-                        pagesArray.sort((a, b) => a.file.name.localeCompare(b.file.name));
-                        
-                        dv.table(
-                            ["Name", "Summary"],
-                            pagesArray.map(p => [
-                                p.file.link,
-                                p.summary
-                            ])
-                        );
+                                p.summary || "",
+                                ...(includeSubjectColumn ? [p.subject || ""] : []),
+                                ...values
+                            ];
+                        })
+                    );
+
+                    if (debug) {
+                        dv.paragraph(`Adaptive columns selected: ${selected.map(s => s.fieldName).join(', ') || 'none'}`);
                     }
                 } else {
                     dv.paragraph("*No related Groups (Concepts/Core Patterns) found with matching domain categories. Please ensure pages have the appropriate frontmatter.*");
