@@ -18,6 +18,7 @@
  *   const { ConceptManager } = customJS;
  *   ConceptManager.helloWorld();
  *   ```
+ * 
  *   - Dynamic System (Recommended)
  *   ```dataviewjs
  *   const { ConceptManager } = customJS;
@@ -34,6 +35,73 @@
  *   });
  *   ```
  * 
+ *   - Smart View Generator (Recommended)
+ *     Runs an adaptive view that analyzes the page and renders:
+ *       1) Concept Analysis, 2) Group Items List, 3) View Table
+ *     (Steps 2–3 run when the page has suitable frontmatter. Control steps via `enabledSteps`.)
+ *   ```dataviewjs
+ *   const { ConceptManager } = customJS;
+ *   ConceptManager.generateSmartView({ 
+ *     dv,
+ *     headerLevel: 2,
+ *     enabledSteps: ['conceptAnalysis', 'groupItems', 'viewTable'],
+ *     debug: false
+ *   });
+ * 
+ *   // Lightweight mode (concept analysis only)
+ *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['conceptAnalysis'] });
+ * 
+ *   // Group-focused mode (items + relationships only)
+ *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['groupItems', 'viewTable'] });
+ *   ```
+ * 
+ *   - Wrapper-Based (Optional)
+ *     Prefer a simple call with sensible defaults? Use `ConceptWrappers.js`:
+ *   ```dataviewjs
+ *   const { ConceptWrappers } = customJS;
+ *   // Default full view
+ *   ConceptWrappers.renderSmartView(dv);
+ *   // Light / Group variants (optional)
+ *   // ConceptWrappers.renderLightSmartView(dv);  // concept analysis only
+ *   // ConceptWrappers.renderGroupSmartView(dv);  // items + relationships
+ *   // Minimal overrides when needed
+ *   // ConceptWrappers.renderSmartView(dv, { headerLevel: 3, debug: true });
+ *   ```
+ * 
+ * Performance Debugging & Optimization:
+  *   - What’s implemented (safe by default):
+  *     • Performance timers and counters (disabled by default)
+  *       - Methods: enablePerfLogging({ enabled, logToConsole }), disablePerfLogging(), resetPerfStats(),
+  *         getPerfSummary(), printPerfSummaryToDv({ dv })
+  *     • Subject/Domain early filtering inside dv.pages().where(...) to minimize candidate sets
+  *       - Applied in: getRelatedFilesByDistance, generateViewTable (hub + regular),
+  *         generateGroupItemsList, renderKeyConnectionsForConcept
+  *     • Config memoization per subject for getConfigForSubject
+  *       - Methods: enableConfigMemoization({ enabled, ttlMs }), invalidateConfigCache(subject?)
+  *     • Sets usage policy: use Sets only for subject/domain gating (built once per query call);
+  *       avoid per-row Sets (value matches still use arrays)
+  * 
+  *   - How to use (example):
+  *   ```dataviewjs
+  *   const { ConceptManager } = customJS;
+  *   ConceptManager.resetPerfStats()
+  *     .enablePerfLogging({ enabled: true, logToConsole: true })
+  *     .enableConfigMemoization({ enabled: true, ttlMs: 0 });
+  *   
+  *   ConceptManager.generateSmartView({ dv, headerLevel: 2, debug: false });
+  *   ConceptManager.printPerfSummaryToDv({ dv });
+  *   ```
+  * 
+  *   - Not implemented (by design):
+  *     • Sub-vault caching of page subsets (risk of staleness). Could be added later with TTL and manual invalidation
+  *     • Per-row Set conversions (these were slower in practice)
+  * 
+  *   - Tips to further reduce work if needed:
+  *     • Disable path scoring: includePath: false (in getRelatedConcepts)
+  *     • Lower maxPathDistance (in getRelatedConcepts)
+  *     • Limit enabledSteps in generateSmartView (e.g., ['conceptAnalysis'] only)
+  *     • Narrow scans by path using Dataview query paths if your vault adheres to folder conventions
+  * 
  * Support the Project:
  *   - Buy Me a Coffee: https://buymeacoffee.com/pequet
  *   - GitHub Sponsors: https://github.com/sponsors/pequet
@@ -290,13 +358,6 @@ class ConceptManager {
             validDomains: validDomains.length
         });
         
-        // Debug information for troubleshooting
-        console.log(`[DEBUG] getRelatedFilesByDistance filtering:
-          - Early-filtered candidates (subject/domain): ${candidateFiles.length}
-          - Subject filter used: [${validSubjects.join(', ')}]
-          - Domain filter used: [${validDomains.join(', ')}]
-          - Sample candidate domains: ${[...new Set(candidateFiles.map(p => p.domain).filter(Boolean))].slice(0, 5).join(', ')}`);
-        
         candidateFiles.forEach(file => {
             const distance = this.calculatePathDistance(currentPath, file.file.path);
             
@@ -416,7 +477,7 @@ class ConceptManager {
         matchCriteria = {}, 
         includePath = true, 
         strictPath = false, 
-        minScore = 0.66, 
+        minScore = 0.5, 
         minResults = 5,
         strictMinResults = true,
         maxResults = 10, 
@@ -425,7 +486,7 @@ class ConceptManager {
         reverseScoreMultiplier = 3.0,
         forwardScoreMultiplier = 3.0,
         pathDistanceMultiplier = 3.0,
-        maxPathDistance = 4,
+        maxPathDistance = 5,
         debug = false 
     }) {
         const __perfMethod = this._perfStart('getRelatedConcepts');
