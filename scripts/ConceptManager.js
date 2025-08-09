@@ -1953,7 +1953,7 @@ class ConceptManager {
                     
                 // Show links to all hubs if found and headerLevel is greater than 0
                 if (headerLevel > 0 && hubs.length > 0) {
-                    dv.header(headerLevel, `Related Hubs (${hubs.length})`);
+                    dv.header(headerLevel, `Related Hubs`);
                 }
                 
                 if (hubs.length > 0) {
@@ -2037,7 +2037,7 @@ class ConceptManager {
                     if (relatedGroups.length > 0) {
                         if (headerLevel > 0) {
                             const hubText = hubs.length === 1 ? "This Hub" : "These Hubs";
-                            dv.header(headerLevel + 1, `Category Peers in ${hubText}`);
+                            dv.header(headerLevel + 1, `Peers in ${hubText}`);
                         }
                         
                         // Get the first domain category to use as key column
@@ -2536,11 +2536,11 @@ class ConceptManager {
      * @param {string} [params.subject] - Subject to use when resolving display names (defaults to current page's subject)
      * @param {boolean} [params.debug=false] - Enable debug logging
      */
-    renderConceptClassifications({ dv, relationTypes, headerLevel = 2, subject, debug = false }) {
+    renderConceptClassifications({ dv, relationTypes, headerLevel = 2, subject, showTable = false, debug = false }) {
         const currentPage = dv.current();
         const currentSubject = subject || currentPage.subject;
 
-        // Insert a single wrapper header "Classifications (n)" before any per-type sections
+        // Insert a single wrapper header "Categories" before any per-type sections
         const presentTypes = relationTypes.filter(type => {
             const currentValues = currentPage["group-" + type];
             const normalized = this.normalizeValues(currentValues || [])
@@ -2550,11 +2550,14 @@ class ConceptManager {
         });
 
         if (presentTypes.length > 0 && headerLevel > 0) {
-            dv.header(headerLevel, `Classifications (${presentTypes.length})`);
+            dv.header(headerLevel, `Classifications`);
         }
 
         // Collect rows for the aggregate table to be rendered AFTER the current output
         const classificationTableRows = [];
+        // For bullet presentation above the table
+        const bulletSections = [];
+        const bulletSubjects = new Set();
 
             relationTypes.forEach((type, index) => {
                 if (debug) {
@@ -2603,8 +2606,6 @@ class ConceptManager {
                 dv.paragraph(`**✅ PRINTING SUBHEADER because we have ${normalizedValues.length} values to process**`);
                 }
                 
-            const subHeaderLevel = Math.min(6, headerLevel + 1);
-            dv.header(subHeaderLevel, headerText);
                 
                 if (debug) {
                     dv.paragraph(`**Values for ${type}: [${normalizedValues.join(', ')}]**`);
@@ -2671,20 +2672,29 @@ class ConceptManager {
                 }
 
                 const hasAnyMatches = processedResults.some(result => result.status !== 'no_match');
-                
+
                 if (debug) {
                     dv.paragraph(`**🎯 FINAL OUTPUT DECISION:**`);
                     dv.paragraph(`  • Total values processed: ${processedResults.length}`);
                     dv.paragraph(`  • Values with matches: ${processedResults.filter(r => r.status !== 'no_match').length}`);
-                    dv.paragraph(`  • Will show: ${hasAnyMatches ? 'LIST OF LINKS' : 'NO MATCHES MESSAGE'}`);
+                    dv.paragraph(`  • Will show: bullets + table`);
                 }
-                
-                if (hasAnyMatches) {
-                    dv.list(processedResults.map(result => result.link));
-                } else {
-                    dv.paragraph(`*No matching pages found for any ${type.replace('group-', '')} values. Please ensure there are pages with matching file names and domain="concepts" or "patterns".*`);
+
+                // Build bullets (subject only if multiple projects overall)
+                const bulletsForType = processedResults
+                    .filter(r => r.status !== 'no_match')
+                    .map((res, idx) => {
+                        const firstMatch = (matchResults[idx] && matchResults[idx].matchingPages && matchResults[idx].matchingPages.length > 0)
+                            ? matchResults[idx].matchingPages[0]
+                            : null;
+                        const subjectText = firstMatch && firstMatch.subject ? firstMatch.subject : "";
+                        if (subjectText) bulletSubjects.add(subjectText);
+                        return { link: res.link, subject: subjectText };
+                    });
+                if (bulletsForType.length > 0) {
+                    bulletSections.push({ headerText, bullets: bulletsForType });
                 }
-                
+
                 if (debug) {
                     dv.paragraph("---");
                 }
@@ -2698,37 +2708,52 @@ class ConceptManager {
                         : null;
                     if (!firstMatch) return null;
                     const pageLink = dv.fileLink(firstMatch.file.path, false, res.value || firstMatch.file.name);
-                    const summaryText = firstMatch.summary || "";
+                    // const summaryText = firstMatch.summary || "";
                     const subjectText = firstMatch.subject || "";
-                    return { pageLink, summaryText, subjectText };
+                    return { pageLink, subjectText };
                 })
                 .filter(Boolean);
 
             const perTypeCount = matchedPerType.length;
             matchedPerType.forEach((row, index) => {
-                const labelCell = index === 0 ? `${headerText} (${perTypeCount})` : "";
-                classificationTableRows.push([labelCell, row.pageLink, row.summaryText, row.subjectText]);
+                const labelCell = index === 0 ? `**${headerText}** (${perTypeCount})` : "";
+                classificationTableRows.push([labelCell, row.pageLink, row.subjectText]);
             });
         });
         
         // Render the aggregate table under the existing output (only if there are rows)
         if (classificationTableRows.length > 0) {
-            const uniqueSubjects = Array.from(new Set(
-                classificationTableRows
-                    .map(r => r[3])
-                    .filter(s => s && String(s).trim().length > 0)
-            ));
-            const includeSubjectColumn = uniqueSubjects.length > 1;
+            // Print bullet presentation above the table
+            if (bulletSections && bulletSections.length > 0) {
+                const includeSubjectsInBullets = bulletSubjects.size > 1;
+                bulletSections.forEach(section => {
+                    const subHeaderLevel = Math.min(6, headerLevel + 1);
+                    dv.header(subHeaderLevel, section.headerText);
+                    const items = section.bullets.map(b => (includeSubjectsInBullets && b.subject)
+                        ? `${b.link} (${b.subject})`
+                        : b.link);
+                    dv.list(items);
+                });
+            }
 
-            const firstColHeader = `Groups${presentTypes.length}`;
-            const headers = includeSubjectColumn
-                ? [firstColHeader, "Pages", "Summary", "Subjects"]
-                : [firstColHeader, "Pages", "Summary"];
-            const rows = includeSubjectColumn
-                ? classificationTableRows
-                : classificationTableRows.map(r => r.slice(0, 3));
+            if (showTable) {
+                const uniqueSubjects = Array.from(new Set(
+                    classificationTableRows
+                        .map(r => r[2])
+                        .filter(s => s && String(s).trim().length > 0)
+                ));
+                const includeSubjectColumn = uniqueSubjects.length > 1;
 
-            dv.table(headers, rows);
+                const firstColHeader = `Category`;
+                const headers = includeSubjectColumn
+                    ? [firstColHeader, "Pages", "Subjects"]
+                    : [firstColHeader, "Pages"];
+                const rows = includeSubjectColumn
+                    ? classificationTableRows
+                    : classificationTableRows.map(r => r.slice(0, 2));
+
+                dv.table(headers, rows);
+            }
         }
     }
 
@@ -2786,7 +2811,7 @@ class ConceptManager {
         });
 
         if (totalConnections > 0 && headerLevel > 0) {
-            dv.header(headerLevel, `Key Connections (${totalConnections})`);
+            dv.header(headerLevel, `Key Connections`);
         }
 
         // Render only non-empty categories
@@ -2829,20 +2854,12 @@ class ConceptManager {
                 debug
             });
 
-            const subHeaderLevel = Math.min(6, headerLevel + 1);
-            dv.header(subHeaderLevel, relationLabel);
-
-            const listItems = matchingPages.map(page => {
-                const title = page.file.name;
-                const summary = page.summary || "";
-                return `**[[${page.file.path}|${title}]]** - ${summary}`;
-            });
-            dv.list(listItems);
+            // Removed per-category subheaders and bullet lists; keeping consolidated table only
 
             // Append rows for the consolidated table (do not repeat the relation label for subsequent rows)
             const relationCount = matchingPages.length;
             matchingPages.forEach((page, index) => {
-                const labelCell = index === 0 ? `${relationLabel} (${relationCount})` : "";
+                const labelCell = index === 0 ? `**${relationLabel}** (${relationCount})` : "";
                 const pageLink = dv.fileLink(page.file.path, false, page.file.name);
                 const summaryText = page.summary || "";
                 const subjectText = page.subject || "";
@@ -2860,8 +2877,8 @@ class ConceptManager {
             const includeSubjectColumn = uniqueSubjects.length > 1;
 
             const headers = includeSubjectColumn
-                ? ["Key Connection", "Pages", "Summary", "Subjects"]
-                : ["Key Connection", "Pages", "Summary"];
+                ? ["Connection", "Pages", "Summary", "Subjects"]
+                : ["Connection", "Pages", "Summary"];
 
             const rows = includeSubjectColumn
                 ? keyConnectionsTableRows
@@ -2872,7 +2889,7 @@ class ConceptManager {
     }
 
     /**
-     * Helper: Render the Top Related Content table based on current page and relationTypes
+     * Helper: Render the Related Content table based on current page and relationTypes
      * This corresponds to what was previously Step 4 inside generateConceptsAnalysis
      *
      * @param {Object} params
@@ -2941,7 +2958,7 @@ class ConceptManager {
             }
 
             // Display related concepts section
-        dv.header(headerLevel, "Top Related Content");
+        dv.header(headerLevel, "Related Content");
 
             if (filteredResults.length === 0) {
                 dv.paragraph("No related \"CONCEPTS\" found.");
@@ -3054,7 +3071,7 @@ class ConceptManager {
 
             // NOTE: Classifications wrapper header is inserted just before rendering sections below (Step 3)
 
-            // Reordered: Classifications → Key Connections → Top Related Content
+            // Reordered: Classifications → Key Connections → Related Content
 
             // STEP 2: Discover relation types (group-* fields)
             const discovery = this.discoverRelationTypesForCurrentConcept({
@@ -3087,6 +3104,7 @@ class ConceptManager {
                 relationTypes,
                 headerLevel,
                 subject: currentSubject,
+                showTable: false,
                 debug
             });
 
@@ -3100,7 +3118,7 @@ class ConceptManager {
 
             // End of reorder block
 
-            // STEP 4: Top Related Content - now delegated to helper
+            // STEP 4: Related Content - now delegated to helper
             this.renderTopRelatedContent({
                 dv,
                 relationTypes,
@@ -3174,7 +3192,6 @@ class ConceptManager {
                 dv.paragraph("---");
             }
 
-            dv.paragraph("step 1");
 
             // Step 1: Get current page and basic analysis
             const currentPage = dv.current();
@@ -3194,7 +3211,7 @@ class ConceptManager {
                 dv.paragraph("---");
             }
 
-            dv.paragraph("step hjkhjhj");
+
             
             // Step 2: Look for config file
             if (debug) {
@@ -3223,8 +3240,6 @@ class ConceptManager {
             }
 
             let viewsGenerated = 0;
-
-            dv.paragraph("step yyuyuuyuyuy");
             
             // Step 3: Check if we should run concept analysis
             const stepEnabled = enabledSteps.includes('conceptAnalysis');
@@ -3274,7 +3289,7 @@ class ConceptManager {
                 }
             }
             
-            dv.paragraph("step xyz");
+
 
             
             // Step 4: Check if we should run Group (Concept/Core Pattern) items list
@@ -3338,7 +3353,7 @@ class ConceptManager {
                 }
             }
             
-            dv.paragraph("step zxcv");
+
 
             // Step 5: Check if we should run view table (group relationships)
             const step5Enabled = enabledSteps.includes('viewTable');

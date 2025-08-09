@@ -5,16 +5,16 @@ This is a CustomJS Class designed for **advanced content discovery** and **workf
 ## Features
 
  - Dynamic concept relationship mapping
- - Contextual Activation (scope-aware) activates only context-relevant vault regions via Subject- and Domain-specific filtering for discovery and relationship traversal
+ - Contextual Activation (scope-aware) activates only context-relevant vault regions via Subject- and Domain- specific filtering for discovery and relationship traversal
  - Bidirectional relationship discovery (forward and reverse references)
- - Multi-dimensional classification (domain, category, level, unit)
+ - Multi-dimensional classification (domain, category, level, unit...)
  - Confidence-calibrated concept associations
  - Proportional weighting for direct and reverse relationships
  - Proximity-weighted path scoring (rewards filesystem adjacency as a proxy for structural organization)
 
 ## The Game Changer: Single-Entry Wrapper Functions
 
-While you can 'raw‑dog' it by calling the raw `ConceptManager` API directly, the simplest way, and only one you should need, is to use this system everywhere is the wrapper’s single, zero‑config method.
+While you can 'raw‑dog' it by calling the raw `ConceptManager` API directly, the simplest way, and only one you should need, is to use this system everywhere is the wrapper’s single, zero‑config method. This means paste this on every page you want to use it on, whether it is a Hub, Group, or a standalone Concept page.
 
 ```dataviewjs
 // Copy both scripts to your CustomJS directory, then use:
@@ -53,7 +53,7 @@ The script adapts to the page it's running in, automatically using the page's me
 
 ## Usage (simple → deeper)
 
-### 0. Initial test (optional)
+### 0. Initial test (recommended)
 
 ```dataviewjs
 const { ConceptManager } = customJS;
@@ -73,7 +73,7 @@ ConceptWrappers.renderSmartView(dv);
 
 ```dataviewjs
 const { ConceptManager } = customJS;
-ConceptManager.generateSmartView({ dv, enabledSteps: ['conceptAnalysis', 'groupItems', 'viewTable'], debug: true });
+ConceptManager.generateSmartView({ dv, enabledSteps: ['conceptAnalysis', 'groupItems', 'viewTable'] });
 ```
 
 ### 3. Deep API: getRelatedConcepts (full control)
@@ -150,6 +150,8 @@ Path distance scoring recognizes that your folder structure represents semantic 
 This aligns with the framework's **Structural Organization** principle, where "folder hierarchy reflects knowledge taxonomy" and "path structure indicates conceptual relationships."
 
 ### Distance Calculation
+
+Structural proximity is a first‑class signal in this system. It captures directory‑tree proximity (how many directory steps separate two notes) and stands orthogonal to Functional relationships.
 
 The system measures filesystem navigation steps between files, rewarding structural proximity:
 
