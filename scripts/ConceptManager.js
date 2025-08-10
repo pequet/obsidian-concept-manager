@@ -1989,15 +1989,13 @@ class ConceptManager {
                 }
                 
                 if (hubs.length > 0) {
-                    if (hubs.length === 1) {
-                        dv.paragraph(`This page belongs to the [[${hubs[0].file.path}|${hubs[0].file.name}]] Hub.`);
-                    } else {
-                        dv.paragraph(`This page belongs to ${hubs.length} Hubs:`);
-                        hubs.forEach(hub => {
-                            dv.paragraph(`• [[${hub.file.path}|${hub.file.name}]]`);
-                        });
-                    }
-                    
+                    // Summary line
+                    const hubCountLabel = hubs.length === 1 ? 'Hub' : 'Hubs';
+                    dv.paragraph(`This page belongs to ${hubs.length} ${hubCountLabel}:`);
+                    // Proper bullet list of hub links
+                    const hubItems = Array.from(hubs).map(hub => dv.fileLink(hub.file.path, false, hub.file.name));
+                    dv.list(hubItems);
+
                     // Find other Groups (Concepts/Core Patterns) in ALL matching Hubs
                     const validSubjectsSet3 = new Set(config.validSubjects || []);
                     const validDomainsSet3 = new Set(config.validDomains || []);
@@ -2069,7 +2067,7 @@ class ConceptManager {
                     if (relatedGroups.length > 0) {
                         if (headerLevel > 0) {
                             const hubText = hubs.length === 1 ? "This Hub" : "These Hubs";
-                            dv.header(headerLevel + 1, `Peers in ${hubText}`);
+                            dv.header(headerLevel + 0, `Peers in ${hubText}`);
                         }
                         
                         // Get the first domain category to use as key column
@@ -3365,9 +3363,6 @@ class ConceptManager {
             }
 
             if (shouldRunViewTable) {
-                // Add some spacing
-                dv.paragraph("");
-                
                 if (debug) {
                     dv.paragraph(`**Executing View Table (Group Relationships)...**`);
                 }
