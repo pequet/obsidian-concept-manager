@@ -44,15 +44,15 @@
  *   ConceptManager.generateSmartView({ 
  *     dv,
  *     headerLevel: 2,
- *     enabledSteps: ['conceptAnalysis', 'groupItems', 'viewTable'],
+ *     enabledSteps: ['relatedContent', 'directConnections', 'relatedHubs'],
  *     debug: false
  *   });
  * 
  *   // Lightweight mode (concept analysis only)
- *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['conceptAnalysis'] });
+ *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['relatedContent'] });
  * 
  *   // Group-focused mode (items + relationships only)
- *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['groupItems', 'viewTable'] });
+ *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['directConnections', 'relatedHubs'] });
  *   ```
  * 
  *   - Wrapper-Based (Optional)
@@ -99,7 +99,7 @@
   *   - Tips to further reduce work if needed:
   *     • Disable path scoring: includePath: false (in getRelatedConcepts)
   *     • Lower maxPathDistance (in getRelatedConcepts)
-  *     • Limit enabledSteps in generateSmartView (e.g., ['conceptAnalysis'] only)
+  *     • Limit enabledSteps in generateSmartView (e.g., ['relatedContent'] only)
   *     • Narrow scans by path using Dataview query paths if your vault adheres to folder conventions
   * 
  * Support the Project:
@@ -3145,14 +3145,14 @@ class ConceptManager {
      * 
      * ## Step Selection:
      * You can control which steps execute using the `enabledSteps` parameter:
-     * - `conceptAnalysis`: Step 3 - Shows concept relationships and groups
-     * - `groupItems`: Step 4 - Shows items belonging to this group  
-     * - `viewTable`: Step 5 - Shows group relationships and hubs
+     * - `relatedContent`: Step 3 - Shows concept relationships and groups
+     * - `directConnections`: Step 4 - Shows items belonging to this group  
+     * - `relatedHubs`: Step 5 - Shows group relationships and hubs
      * 
      * @param {Object} params - Parameters object
      * @param {Object} params.dv - The Dataview API object
      * @param {number} [params.headerLevel=2] - The level for headers (1-6)
-     * @param {Array<string>} [params.enabledSteps=['conceptAnalysis', 'groupItems', 'viewTable']] - Which view steps to execute
+     * @param {Array<string>} [params.enabledSteps=['relatedContent', 'directConnections', 'relatedHubs']] - Which view steps to execute
      * @param {boolean} [params.debug=false] - Enable debug logging
      * 
      * @example
@@ -3163,17 +3163,17 @@ class ConceptManager {
      * // Light mode (concept analysis only)
      * ConceptManager.generateSmartView({ 
      *   dv, 
-     *   enabledSteps: ['conceptAnalysis'] 
+     *   enabledSteps: ['relatedContent'] 
      * });
      * 
      * // Group-focused mode (skip concept analysis)
      * ConceptManager.generateSmartView({ 
      *   dv, 
-     *   enabledSteps: ['groupItems', 'viewTable'] 
+     *   enabledSteps: ['directConnections', 'relatedHubs'] 
      * });
      * ```
      */
-    generateSmartView({ dv, headerLevel = 2, enabledSteps = ['conceptAnalysis', 'groupItems', 'viewTable'], debug = false }) {
+    generateSmartView({ dv, headerLevel = 2, enabledSteps = ['directConnections', 'relatedContent', 'relatedHubs'], debug = false }) {
         try {
             if (debug) {
                 dv.header(headerLevel, "🔬 Smart View Generator - Debug Mode");
@@ -3231,14 +3231,41 @@ class ConceptManager {
             }
 
             let viewsGenerated = 0;
-            
-            // Step 3: Check if we should run concept analysis
-            const stepEnabled = enabledSteps.includes('conceptAnalysis');
+
+            // New order: Direct Connections → Concept Analysis → Related Hubs
+
+            // Direct Connections (Group Items) FIRST
+            const step4Enabled = enabledSteps.includes('directConnections');
+            const hasDomainCategory = !!currentPage["domain-category"];
+            const shouldRunGroupItems = step4Enabled && hasDomainCategory;
+
+            if (debug) {
+                dv.paragraph(`**Direct Connections Check**`);
+                dv.paragraph(`Step enabled: ${step4Enabled ? "Yes" : "No"}`);
+                dv.paragraph(`Has domain-category: ${hasDomainCategory ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Group (Concept/Core Pattern) items list: ${shouldRunGroupItems ? "Yes" : "No"}`);
+            }
+
+            if (shouldRunGroupItems) {
+                dv.paragraph("");
+                let headerText = `Key Connections (n)`;
+                if (debug) dv.paragraph(`**Executing Group (Concept/Core Pattern) Items List...**`);
+                this.generateGroupItemsList({ dv, headerLevel, headerText, debug: debug });
+                viewsGenerated++;
+                if (debug) { dv.paragraph(`✅ Group (Concept/Core Pattern) items list completed. Views generated so far: ${viewsGenerated}`); dv.paragraph("---"); }
+            } else if (debug) {
+                const reason = !step4Enabled ? "step disabled by user" : "no domain-category found";
+                dv.paragraph(`❌ Skipping Group (Concept/Core Pattern) items list - ${reason}`);
+                dv.paragraph("---");
+            }
+
+            // Concept Analysis (Related Content) SECOND
+            const stepEnabled = enabledSteps.includes('relatedContent');
             const domainRequirementMet = currentPage.domain === "concepts" || currentPage.domain === "patterns";
             const shouldRunConceptAnalysis = stepEnabled && domainRequirementMet;
-            
+
             if (debug) {
-                dv.paragraph(`**Step 3: Concept Analysis Check**`);
+                dv.paragraph(`**Concept Analysis Check**`);
                 dv.paragraph(`Step enabled: ${stepEnabled ? "Yes" : "No"}`);
                 dv.paragraph(`Current domain: ${currentPage.domain}`);
                 dv.paragraph(`Domain requirement met: ${domainRequirementMet ? "Yes" : "No"}`);
@@ -3247,107 +3274,20 @@ class ConceptManager {
             }
 
             if (shouldRunConceptAnalysis) {
-                if (debug) {
-                    dv.paragraph(`**Executing Concept Analysis...**`);
-                }
-
-                // Get relation types from config
                 const relationTypes = configData.validFilters || [];
-                
-                if (debug) {
-                    dv.paragraph(`Relation types to use: ${relationTypes.length > 0 ? relationTypes.join(', ') : "none (will use defaults)"}`);
-                    dv.paragraph("---");
-                }
-                
-                // Generate concept analysis
-                this.generateConceptsAnalysis({ 
-                    dv, 
-                    relationTypes,
-                    headerLevel: headerLevel,
-                    debug: debug
-                });
-                
+                if (debug) { dv.paragraph(`Relation types to use: ${relationTypes.length > 0 ? relationTypes.join(', ') : "none (will use defaults)"}`); dv.paragraph("---"); }
+                this.generateConceptsAnalysis({ dv, relationTypes, headerLevel: headerLevel, debug: debug });
                 viewsGenerated++;
-                
-                if (debug) {
-                    dv.paragraph(`✅ Concept Analysis completed. Views generated so far: ${viewsGenerated}`);
-                    dv.paragraph("---");
-                }
-            } else {
-                if (debug) {
-                    dv.paragraph(`❌ Skipping Concept Analysis - ${!stepEnabled ? "step disabled by user" : "domain requirements not met"}`);
-                    dv.paragraph("---");
-                }
-            }
-            
-
-
-            
-            // Step 4: Check if we should run Group (Concept/Core Pattern) items list
-            const step4Enabled = enabledSteps.includes('groupItems');
-            const hasDomainCategory = !!currentPage["domain-category"];
-            // Avoid duplicating Key Connections if Concept Analysis already rendered them
-            const shouldRunGroupItems = step4Enabled && hasDomainCategory && !shouldRunConceptAnalysis;
-            
-            if (debug) {
-                dv.paragraph(`**Step 4: Group (Concept/Core Pattern) Items List Check**`);
-                dv.paragraph(`Step enabled: ${step4Enabled ? "Yes" : "No"}`);
-                dv.paragraph(`Has domain-category: ${hasDomainCategory ? "Yes" : "No"}`);
-                dv.paragraph(`Concept Analysis already ran: ${shouldRunConceptAnalysis ? "Yes" : "No"}`);
-                dv.paragraph(`Should run Group (Concept/Core Pattern) items list: ${shouldRunGroupItems ? "Yes" : "No"}`);
-                dv.paragraph(`Reasoning: ${!step4Enabled ? "Step disabled by enabledSteps parameter" : !hasDomainCategory ? "No domain-category found in frontmatter" : shouldRunConceptAnalysis ? "Already rendered inside Concept Analysis (avoiding duplicate Key Connections)" : "All requirements met"}`);
-            }
-
-            if (shouldRunGroupItems) {
-                // Add some spacing
-                dv.paragraph("");
-                
-                if (debug) {
-                    dv.paragraph(`**Preparing Group (Concept/Core Pattern) Items List Header...**`);
-                }
-
-                // // Generate default header text based on domain-category if not provided
-                // let headerText = groupItemsHeaderText;
-                // if (!headerText) {
-                //     const categories = this.normalizeValues(currentPage["domain-category"]);
-                //     if (categories.length > 0) {
-                //         headerText = `asdfgh Items in this Group (Concept/Core Pattern) ${currentPage["domain-category"]}: ${currentPage.file.name}`;
-                //     }
-                // }
-
-                let headerText = `Key Connections (n)`; // Content related to ${currentPage.file.name} ??????????????????????
-                
-                if (debug) {
-                    dv.paragraph(`Final header text: ${headerText}`);
-                    dv.paragraph(`**Executing Group (Concept/Core Pattern) Items List...**`);
-                }
-                
-                // Generate group items list
-                this.generateGroupItemsList({ 
-                    dv, 
-                    headerLevel,
-                    headerText,
-                    debug: debug
-                });
-                
-                viewsGenerated++;
-                
-                if (debug) {
-                    dv.paragraph(`✅ Group (Concept/Core Pattern) items list completed. Views generated so far: ${viewsGenerated}`);
-                    dv.paragraph("---");
-                }
-            } else {
-                if (debug) {
-                    const reason = !step4Enabled ? "step disabled by user" : !hasDomainCategory ? "no domain-category found" : "already rendered inside Concept Analysis";
-                    dv.paragraph(`❌ Skipping Group (Concept/Core Pattern) items list - ${reason}`);
-                    dv.paragraph("---");
-                }
+                if (debug) { dv.paragraph(`✅ Concept Analysis completed. Views generated so far: ${viewsGenerated}`); dv.paragraph("---"); }
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Concept Analysis - ${!stepEnabled ? "step disabled by user" : "domain requirements not met"}`);
+                dv.paragraph("---");
             }
             
 
 
             // Step 5: Check if we should run view table (group relationships)
-            const step5Enabled = enabledSteps.includes('viewTable');
+            const step5Enabled = enabledSteps.includes('relatedHubs');
             const hasDomainCategoryForTable = !!currentPage["domain-category"];
             const shouldRunViewTable = step5Enabled && hasDomainCategoryForTable;
             
@@ -3403,8 +3343,8 @@ class ConceptManager {
                 } else {
                     dv.paragraph(`   ❌ **SKIPPED** - ${!stepEnabled ? "Step disabled by user" : "Domain requirement not met"}`);
                     if (!stepEnabled) {
-                        dv.paragraph(`   📋 Reason: 'conceptAnalysis' not in enabledSteps parameter`);
-                        dv.paragraph(`   🔧 Fix: Add 'conceptAnalysis' to enabledSteps array`);
+                        dv.paragraph(`   📋 Reason: 'relatedContent' not in enabledSteps parameter`);
+                        dv.paragraph(`   🔧 Fix: Add 'relatedContent' to enabledSteps array`);
                     } else {
                         dv.paragraph(`   📋 Reason: Page domain is "${currentPage.domain || 'undefined'}" (requires "concepts" or "patterns")`);
                         dv.paragraph(`   🔧 Fix: Set domain to "concepts" or "patterns" in frontmatter`);
@@ -3420,8 +3360,8 @@ class ConceptManager {
                     const skippedReason = !step4Enabled ? "Step disabled by user" : !hasDomainCategory ? "Missing domain-category field" : "Rendered inside Concept Analysis (avoided duplicate)";
                     dv.paragraph(`   ❌ **SKIPPED** - ${skippedReason}`);
                     if (!step4Enabled) {
-                        dv.paragraph(`   📋 Reason: 'groupItems' not in enabledSteps parameter`);
-                        dv.paragraph(`   🔧 Fix: Add 'groupItems' to enabledSteps array`);
+                        dv.paragraph(`   📋 Reason: 'directConnections' not in enabledSteps parameter`);
+                        dv.paragraph(`   🔧 Fix: Add 'directConnections' to enabledSteps array`);
                     } else if (!hasDomainCategory) {
                         dv.paragraph(`   📋 Reason: Page does not have "domain-category" in frontmatter`);
                         dv.paragraph(`   🔧 Fix: Add "domain-category: [category-name]" to frontmatter`);
@@ -3438,8 +3378,8 @@ class ConceptManager {
                 } else {
                     dv.paragraph(`   ❌ **SKIPPED** - ${!step5Enabled ? "Step disabled by user" : "Missing domain-category field"}`);
                     if (!step5Enabled) {
-                        dv.paragraph(`   📋 Reason: 'viewTable' not in enabledSteps parameter`);
-                        dv.paragraph(`   🔧 Fix: Add 'viewTable' to enabledSteps array`);
+                        dv.paragraph(`   📋 Reason: 'relatedHubs' not in enabledSteps parameter`);
+                        dv.paragraph(`   🔧 Fix: Add 'relatedHubs' to enabledSteps array`);
                     } else {
                         dv.paragraph(`   📋 Reason: Page does not have "domain-category" in frontmatter`);
                         dv.paragraph(`   🔧 Fix: Add "domain-category: [category-name]" to frontmatter`);
@@ -3456,7 +3396,7 @@ class ConceptManager {
                     dv.paragraph("");
                     dv.paragraph(`⚠️ **NO VIEWS EXECUTED** - Either steps are disabled or page doesn't meet requirements`);
                     dv.paragraph(`**Potential fixes:**`);
-                    dv.paragraph(`  • Enable more steps: Add 'conceptAnalysis', 'groupItems', or 'viewTable' to enabledSteps`);
+                    dv.paragraph(`  • Enable more steps: Add 'relatedContent', 'directConnections', or 'relatedHubs' to enabledSteps`);
                     dv.paragraph(`  • For Concept Analysis: Add domain: "concepts" or domain: "patterns"`);
                     dv.paragraph(`  • For Group views: Add domain-category: [category-name]`);
                 } else if (viewsGenerated < 3) {

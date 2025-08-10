@@ -73,7 +73,7 @@ ConceptWrappers.renderSmartView(dv);
 
 ```dataviewjs
 const { ConceptManager } = customJS;
-ConceptManager.generateSmartView({ dv, enabledSteps: ['conceptAnalysis', 'groupItems', 'viewTable'] });
+ConceptManager.generateSmartView({ dv, enabledSteps: ['relatedContent', 'directConnections', 'relatedHubs'] });
 ```
 
 ### 3. Deep API: getRelatedConcepts (full control)

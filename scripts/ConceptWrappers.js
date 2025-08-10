@@ -188,12 +188,12 @@ class ConceptWrappers {
      *
      * @param {Object} dv - Dataview API
      * @param {Object} options
-     * @param {Array<string>} [options.sections=['conceptAnalysis','groupItems','viewTable']] - Sections to run
+     * @param {Array<string>} [options.sections=['relatedContent','directConnections','relatedHubs']] - Sections to run
      * @param {number} [options.headerLevel=2] - Header level to pass through
      * @param {number} [options.concurrency=1] - Max concurrent section builds (UI-friendly: 1–2)
      * @param {boolean} [options.debug=false] - Wrapper-level debug logging
      */
-    renderSmarterView(dv, { sections = ['conceptAnalysis', 'groupItems', 'viewTable'], headerLevel = 2, concurrency = 1, debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000 } = {}) {
+    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 1, debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true } = {}) {
         const { ConceptManager } = customJS;
 
         // Root container and ordered slots
@@ -216,9 +216,17 @@ class ConceptWrappers {
             slot.style.minHeight = '1em';
             slot.style.marginBottom = '0.5rem';
             const cached = this._smarterCache.get(makeKey(section));
-            if (cached) {
+            if (cached !== undefined) {
                 // Pre-fill from cache to avoid flash on DV reruns
-                slot.innerHTML = cached;
+                if (collapseEmptySections && cached === '') {
+                    // Previously known empty: keep collapsed
+                    slot.style.display = 'none';
+                    slot.style.minHeight = '0';
+                    slot.style.marginBottom = '0';
+                    slot.innerHTML = '';
+                } else {
+                    slot.innerHTML = cached;
+                }
             } else if (debug) {
                 slot.textContent = `Loading ${section}…`;
             }
@@ -272,22 +280,56 @@ class ConceptWrappers {
                         const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
                         const quietFor = now - lastMutationAt;
                         const waited = now - startedAt;
-                    const hasAnyContent = staging.querySelector('table, tr, td, th, ul, li, p, h1, h2, h3, h4, h5, h6') || (staging.textContent || '').trim().length > 0;
-                    if ((hasAnyContent && quietFor >= quietMs) || waited >= maxWaitMs) {
+                        const hasAnyContent = staging.querySelector('table, tr, td, th, ul, li, p, h1, h2, h3, h4, h5, h6') || (staging.textContent || '').trim().length > 0;
+                        if ((hasAnyContent && quietFor >= quietMs) || waited >= maxWaitMs) {
                             observer.disconnect();
-                            const newHtml = staging.innerHTML;
-                            const oldHtml = this._smarterCache.get(key) || '';
-                        if (debug && console && console.log) {
-                            const tableRows = staging.querySelectorAll('table tr').length;
-                            const cellCount = staging.querySelectorAll('td, th').length;
-                            console.log('[SmarterView] commit', { section, index, quietFor, waited, tableRows, cellCount, changed: newHtml !== oldHtml, timedOut: waited >= maxWaitMs });
-                        }
-                            if (newHtml !== oldHtml) {
-                                const frag = document.createDocumentFragment();
-                                while (staging.firstChild) frag.appendChild(staging.firstChild);
-                                slots[index].replaceChildren(frag);
-                                this._smarterCache.set(key, newHtml);
-                                if (debug && console && console.log) console.log('[SmarterView] updated', { section, index, bytes: newHtml.length });
+                            const rawHtml = staging.innerHTML;
+                            const hadCache = this._smarterCache.has(key);
+                            const oldHtml = hadCache ? this._smarterCache.get(key) : '';
+
+                            // Determine if result has meaningful visible content
+                            const meaningfulNode = staging.querySelector('table tr, td, th, ul li, ol li, h1, h2, h3, h4, h5, h6, a[href], img, pre, code, blockquote');
+                            const hasMeaningfulText = ((staging.textContent || '').trim().length > 0);
+                            const isMeaningful = Boolean(meaningfulNode || hasMeaningfulText);
+
+                            const newHtml = (collapseEmptySections && !isMeaningful) ? '' : rawHtml;
+                            const changed = (!hadCache) || (newHtml !== oldHtml);
+
+                            if (debug && console && console.log) {
+                                const tableRows = staging.querySelectorAll('table tr').length;
+                                const cellCount = staging.querySelectorAll('td, th').length;
+                                console.log('[SmarterView] commit', { section, index, quietFor, waited, tableRows, cellCount, isMeaningful, changed, timedOut: waited >= maxWaitMs });
+                            }
+
+                            if (changed) {
+                                if (newHtml === '') {
+                                    // Collapse empty section
+                                    slots[index].innerHTML = '';
+                                    slots[index].style.display = 'none';
+                                    slots[index].style.minHeight = '0';
+                                    slots[index].style.marginBottom = '0';
+                                    this._smarterCache.set(key, '');
+                                    if (debug && console && console.log) console.log('[SmarterView] collapsed (empty)', { section, index });
+                                } else {
+                                    // Show populated section
+                                    const frag = document.createDocumentFragment();
+                                    while (staging.firstChild) frag.appendChild(staging.firstChild);
+                                    slots[index].replaceChildren(frag);
+                                    slots[index].style.display = '';
+                                    slots[index].style.minHeight = '1em';
+                                    slots[index].style.marginBottom = '0.5rem';
+                                    this._smarterCache.set(key, newHtml);
+                                    if (debug && console && console.log) console.log('[SmarterView] updated', { section, index, bytes: newHtml.length });
+                                }
+                            } else if (!isMeaningful && collapseEmptySections) {
+                                // Ensure collapsed state even if unchanged
+                                slots[index].innerHTML = '';
+                                slots[index].style.display = 'none';
+                                slots[index].style.minHeight = '0';
+                                slots[index].style.marginBottom = '0';
+                                // Prime cache if missing so future runs don't show loading
+                                if (!hadCache) this._smarterCache.set(key, '');
+                                if (debug && console && console.log) console.log('[SmarterView] unchanged (still empty, collapsed)', { section, index });
                             } else if (debug && console && console.log) {
                                 console.log('[SmarterView] unchanged', { section, index });
                             }
@@ -344,7 +386,7 @@ class ConceptWrappers {
         ConceptManager.generateSmartView({
             dv,
             headerLevel,
-            enabledSteps: ['conceptAnalysis', 'groupItems', 'viewTable'],
+            enabledSteps: ['directConnections', 'relatedContent', 'relatedHubs'],
             debug
         });
     }
@@ -357,7 +399,7 @@ class ConceptWrappers {
         ConceptManager.generateSmartView({
             dv,
             headerLevel,
-            enabledSteps: ['conceptAnalysis'],
+            enabledSteps: ['relatedContent'],
             debug
         });
     }
@@ -370,7 +412,7 @@ class ConceptWrappers {
         ConceptManager.generateSmartView({
             dv,
             headerLevel,
-            enabledSteps: ['groupItems', 'viewTable'],
+            enabledSteps: ['directConnections', 'relatedHubs'],
             debug
         });
     }
