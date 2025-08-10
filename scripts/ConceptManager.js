@@ -124,6 +124,10 @@ class ConceptManager {
         // Lightweight lookup caches (session-scoped)
         this._canonicalNameCache = new Map(); // key: subject||domainCategory -> string|null
         this._displayNameCache = new Map();   // key: subject||domainCategory -> string
+
+        // Classifications: index cache (subject/filters-scoped)
+        // key: `${subject}||S:${sortedValidSubjects}||D:${sortedValidDomains}` -> { nameIndex, aliasIndex, eligibleCount, createdAtMs }
+        this._classLookupIndexCache = new Map();
     }
 
     // --- Performance Logging Controls ---
@@ -2603,45 +2607,103 @@ class ConceptManager {
         const validSubjectsSetForClass = new Set(__cfgForClassifications.validSubjects || []);
         const validDomainsSetForClass = new Set(__cfgForClassifications.validDomains || []);
 
-        // Prefetch once: eligible pages for name/alias lookups (subject/domain gated; archives excluded)
-        const __eligibleClassToken = this._perfStart('renderConceptClassifications.eligible');
-        const eligiblePagesForNames = dv.pages()
-            .where(p => {
-                // Exclude archives by path (case-insensitive)
-                const pathLower = String(p.file?.path || '').toLowerCase();
-                if (
-                    pathLower.includes('/archives/') ||
-                    pathLower.includes('/models/4. archives/')
-                ) return false;
+        // Prefetch once with small in-session cache
+        const sortedSubjectsKey = Array.from(validSubjectsSetForClass).sort().join(',');
+        const sortedDomainsKey = Array.from(validDomainsSetForClass).sort().join(',');
+        const indexCacheKey = `${currentSubject}||S:${sortedSubjectsKey}||D:${sortedDomainsKey}`;
 
-                // Early subject/domain gating
-                if (validSubjectsSetForClass.size > 0 && !validSubjectsSetForClass.has(p.subject)) return false;
-                if (validDomainsSetForClass.size > 0 && !validDomainsSetForClass.has(p.domain)) return false;
-                return true;
-            })
-            .array();
-        this._perfEnd(__eligibleClassToken, { eligible: eligiblePagesForNames.length });
+        let nameIndex;
+        let aliasIndex;
 
-        // Build quick lookup indexes once
-        const nameIndex = new Map(); // lower(name) -> pages[]
-        const aliasIndex = new Map(); // lower(alias) -> pages[]
-        for (const page of eligiblePagesForNames) {
-            const nameLower = String(page.file?.name || '').toLowerCase();
-            if (nameLower.length > 0) {
-                const list = nameIndex.get(nameLower) || [];
-                list.push(page);
-                nameIndex.set(nameLower, list);
+        const cachedIndex = this._classLookupIndexCache && this._classLookupIndexCache.get(indexCacheKey);
+        if (cachedIndex) {
+            nameIndex = cachedIndex.nameIndex;
+            aliasIndex = cachedIndex.aliasIndex;
+        } else {
+            const __eligibleClassToken = this._perfStart('renderConceptClassifications.eligible');
+            const eligiblePagesForNames = dv.pages()
+                .where(p => {
+                    // Exclude archives by path (case-insensitive)
+                    const pathLower = String(p.file?.path || '').toLowerCase();
+                    if (
+                        pathLower.includes('/archives/') ||
+                        pathLower.includes('/models/4. archives/')
+                    ) return false;
+
+                    // Early subject/domain gating
+                    if (validSubjectsSetForClass.size > 0 && !validSubjectsSetForClass.has(p.subject)) return false;
+                    if (validDomainsSetForClass.size > 0 && !validDomainsSetForClass.has(p.domain)) return false;
+                    return true;
+                })
+                .array();
+            this._perfEnd(__eligibleClassToken, { eligible: eligiblePagesForNames.length });
+
+            // Build quick lookup indexes once
+            nameIndex = new Map(); // lower(name) -> pages[]
+            aliasIndex = new Map(); // lower(alias) -> pages[]
+            for (const page of eligiblePagesForNames) {
+                const nameLower = String(page.file?.name || '').toLowerCase();
+                if (nameLower.length > 0) {
+                    const list = nameIndex.get(nameLower) || [];
+                    list.push(page);
+                    nameIndex.set(nameLower, list);
+                }
+                if (Array.isArray(page.aliases)) {
+                    for (const alias of page.aliases) {
+                        const aliasLower = String(alias).toLowerCase();
+                        if (aliasLower.length === 0) continue;
+                        const list = aliasIndex.get(aliasLower) || [];
+                        list.push(page);
+                        aliasIndex.set(aliasLower, list);
+                    }
+                }
             }
-            if (Array.isArray(page.aliases)) {
+
+            // Save to cache
+            if (!this._classLookupIndexCache) this._classLookupIndexCache = new Map();
+            this._classLookupIndexCache.set(indexCacheKey, {
+                nameIndex,
+                aliasIndex,
+                createdAtMs: this._getNowMs()
+            });
+        }
+
+        // Alias index: build lazily only if needed (when a value misses nameIndex)
+        let aliasIndexLocal = aliasIndex;
+        let aliasIndexBuilt = !!aliasIndexLocal;
+        const buildAliasIndexIfNeeded = (need) => {
+            if (aliasIndexBuilt || !need) return;
+            const __eligibleAliasToken = this._perfStart('renderConceptClassifications.aliasIndex');
+            const eligiblePagesForAlias = dv.pages()
+                .where(p => {
+                    const pathLower = String(p.file?.path || '').toLowerCase();
+                    if (
+                        pathLower.includes('/archives/') ||
+                        pathLower.includes('/models/4. archives/')
+                    ) return false;
+                    if (validSubjectsSetForClass.size > 0 && !validSubjectsSetForClass.has(p.subject)) return false;
+                    if (validDomainsSetForClass.size > 0 && !validDomainsSetForClass.has(p.domain)) return false;
+                    return Array.isArray(p.aliases) && p.aliases.length > 0;
+                })
+                .array();
+            aliasIndexLocal = new Map();
+            for (const page of eligiblePagesForAlias) {
                 for (const alias of page.aliases) {
                     const aliasLower = String(alias).toLowerCase();
                     if (aliasLower.length === 0) continue;
-                    const list = aliasIndex.get(aliasLower) || [];
-                    list.push(page);
-                    aliasIndex.set(aliasLower, list);
+                    // Only store first match per alias for speed
+                    if (!aliasIndexLocal.has(aliasLower)) {
+                        aliasIndexLocal.set(aliasLower, page);
+                    }
                 }
             }
-        }
+            this._perfEnd(__eligibleAliasToken, { aliasedPages: eligiblePagesForAlias.length, aliasesIndexed: aliasIndexLocal.size });
+            aliasIndexBuilt = true;
+            // Update cache entry with alias index for reuse
+            const existing = this._classLookupIndexCache.get(indexCacheKey) || { nameIndex };
+            existing.aliasIndex = aliasIndexLocal;
+            this._classLookupIndexCache.set(indexCacheKey, existing);
+        };
 
         // Insert a single wrapper header "Categories" before any per-type sections
         const presentTypes = relationTypes.filter(type => {
@@ -2720,21 +2782,18 @@ class ConceptManager {
                     const valueString = String(value).trim();
                     const valueLower = valueString.toLowerCase();
 
-                    // Resolve matches from prebuilt indexes (dedup by path)
+                    // Resolve matches with minimal work:
+                    // 1) Try nameIndex (fast). If none, lazily build aliasIndex and try single best alias match.
                     const matches = [];
-                    const seenPaths = new Set();
-                    const nameMatches = nameIndex.get(valueLower) || [];
-                    for (const m of nameMatches) {
-                        if (!seenPaths.has(m.file.path)) {
-                            seenPaths.add(m.file.path);
-                            matches.push(m);
-                        }
-                    }
-                    const aliasMatches = aliasIndex.get(valueLower) || [];
-                    for (const m of aliasMatches) {
-                        if (!seenPaths.has(m.file.path)) {
-                            seenPaths.add(m.file.path);
-                            matches.push(m);
+                    const nameMatches = nameIndex.get(valueLower);
+                    if (nameMatches && nameMatches.length > 0) {
+                        // Take first only for bullet and table purposes
+                        matches.push(nameMatches[0]);
+                    } else {
+                        buildAliasIndexIfNeeded(true);
+                        const aliasMatchPage = aliasIndexLocal.get(valueLower);
+                        if (aliasMatchPage) {
+                            matches.push(aliasMatchPage);
                         }
                     }
 
@@ -2745,25 +2804,14 @@ class ConceptManager {
                 const processedResults = matchResults.map(({ value, matchingPages }) => {
                     if (matchingPages.length === 0) {
                         return { value, link: value, status: 'no_match' };
-                    } else if (matchingPages.length === 1) {
-                        const match = matchingPages[0];
-                        return { 
-                            value, 
-                            link: `[[${match.file.path}|${value}]]`, 
-                            status: 'single_match',
-                            matchPath: match.file.path
-                        };
-                    } else {
-                        const match = matchingPages[0];
-                        return { 
-                            value, 
-                            link: `[[${match.file.path}|${value}]]`, 
-                            status: 'multiple_matches',
-                            count: matchingPages.length,
-                            matchPath: match.file.path,
-                            allMatches: matchingPages.map(p => p.file.name)
-                        };
                     }
+                    const match = matchingPages[0];
+                    return { 
+                        value, 
+                        link: `[[${match.file.path}|${value}]]`, 
+                        status: 'single_match',
+                        matchPath: match.file.path
+                    };
                 });
 
                 if (debug) {
@@ -2822,7 +2870,6 @@ class ConceptManager {
                         : null;
                     if (!firstMatch) return null;
                     const pageLink = dv.fileLink(firstMatch.file.path, false, res.value || firstMatch.file.name);
-                    // const summaryText = firstMatch.summary || "";
                     const subjectText = firstMatch.subject || "";
                     return { pageLink, subjectText };
                 })
@@ -3581,5 +3628,6 @@ class ConceptManager {
         }
     }
 } 
+
 
 
