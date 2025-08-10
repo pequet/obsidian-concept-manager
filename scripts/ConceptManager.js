@@ -203,6 +203,35 @@ class ConceptManager {
         }
         return { totals, callCounts: { ...this._callCounts } };
     }
+ 
+     /**
+      * Formats the provided Date to 'YYYY-MM-DD HH:MM:SS'.
+      * @param {Date} date
+      * @returns {string}
+      */
+     _formatTimestamp(date = new Date()) {
+         const pad = (n) => String(n).padStart(2, '0');
+         const yyyy = date.getFullYear();
+         const mm = pad(date.getMonth() + 1);
+         const dd = pad(date.getDate());
+         const hh = pad(date.getHours());
+         const min = pad(date.getMinutes());
+         const ss = pad(date.getSeconds());
+         return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+     }
+ 
+     /**
+      * Renders a small, greyed-out timestamp line beneath a section.
+      * @param {Object} params
+      * @param {Object} params.dv - Dataview API
+      * @param {string} [params.label='Rendered at'] - Prefix label
+      */
+     _renderTimestamp({ dv, label = 'Rendered at' } = {}) {
+         if (!dv) return;
+         const ts = this._formatTimestamp(new Date());
+         // Use HTML to get a subtle, grey style
+         dv.paragraph(`<div style="color:#888; font-size:0.9em; margin-top:6px;">${label}: ${ts}</div>`);
+     }
 
     enableConfigMemoization({ enabled = true, ttlMs = 0 } = {}) {
         this._configCacheOptions.enabled = !!enabled;
@@ -1698,7 +1727,7 @@ class ConceptManager {
      * @param {number} [params.headerLevel=2] - The level for the header (1-6)
      * @param {boolean} [params.debug=false] - Show detailed debug output
      */
-    generateViewTable({ dv, headerLevel = 2, debug = false }) {
+    generateViewTable({ dv, headerLevel = 2, debug = false, showTimestamp = false }) {
         try {
             const currentPage = dv.current();
             
@@ -1877,8 +1906,10 @@ class ConceptManager {
                     });
 
                     dv.table(columns, rows);
+                    if (showTimestamp) this._renderTimestamp({ dv });
                 } else {
                     dv.paragraph("*No related Groups (Concepts/Core Patterns) found with matching domain categories. Please ensure pages have the appropriate frontmatter.*");
+                    if (showTimestamp) this._renderTimestamp({ dv });
                 }
 
             } else {
@@ -2092,6 +2123,7 @@ class ConceptManager {
                                 });
 
                                 dv.table(columns, rows);
+                                if (showTimestamp) this._renderTimestamp({ dv });
                         } else {
                             // Fallback to original behavior if no domain categories or no groups have values for the key
                             const pagesArray = Array.from(relatedGroups);
@@ -2126,6 +2158,7 @@ class ConceptManager {
                                 });
 
                                 dv.table(columns, rows);
+                                if (showTimestamp) this._renderTimestamp({ dv });
                         }
                     } 
                 } else {
@@ -2184,7 +2217,7 @@ class ConceptManager {
      * @param {string} [params.headerText] - Custom header text (defaults to current page name)
      * @param {boolean} [params.debug=false] - Show detailed debug output
      */
-    generateGroupItemsList({ dv, groupType, headerLevel = 2, headerText, debug = false }) {
+    generateGroupItemsList({ dv, groupType, headerLevel = 2, headerText, debug = false, showTimestamp = false }) {
         try {
             const currentPage = dv.current();
             
@@ -2332,6 +2365,7 @@ class ConceptManager {
             }
             
             // Process each group type
+            let __printedAny = false;
             groupTypes.forEach((type, index) => {
                 if (debug) {
                     dv.paragraph(`**Step 3.${index + 1}: Processing Group (Concept/Core Pattern) type "${type}"**`);
@@ -2451,8 +2485,13 @@ class ConceptManager {
                     });
                     
                     dv.list(listItems);
+                    __printedAny = true;
                 }
             });
+
+            if (showTimestamp && __printedAny) {
+                this._renderTimestamp({ dv });
+            }
         } catch (error) {
             dv.header(headerLevel, "⚠️ Error Loading Content");
             dv.paragraph(`**Error:** ${error.message}`);
@@ -2759,7 +2798,7 @@ class ConceptManager {
      * @param {number} [params.headerLevel=2] - Header level to use
      * @param {boolean} [params.debug=false] - Enable debug logging
      */
-    renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel = 2, debug = false }) {
+    renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel = 2, debug = false, showTimestamp = false }) {
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
         const groupValue = currentPage.file.name;
@@ -2876,6 +2915,7 @@ class ConceptManager {
                 : keyConnectionsTableRows.map(r => r.slice(0, 3));
 
             dv.table(headers, rows);
+            if (showTimestamp) this._renderTimestamp({ dv });
         }
     }
 
@@ -2890,7 +2930,7 @@ class ConceptManager {
      * @param {number} [params.headerLevel=2] - Header level to use
      * @param {boolean} [params.debug=false] - Enable debug logging
      */
-    renderTopRelatedContent({ dv, relationTypes, validSubjects, headerLevel = 2, debug = false }) {
+    renderTopRelatedContent({ dv, relationTypes, validSubjects, headerLevel = 2, debug = false, showTimestamp = false }) {
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
 
@@ -2953,6 +2993,7 @@ class ConceptManager {
 
             if (filteredResults.length === 0) {
                 dv.paragraph("No related \"CONCEPTS\" found.");
+                if (showTimestamp) this._renderTimestamp({ dv });
             } else {
             // Include Subject column if results span multiple subjects (within the subjectsToUse filter)
             const uniqueSubjects = Array.from(new Set(filteredResults.map(r => r.concept.subject).filter(Boolean)));
@@ -2968,6 +3009,7 @@ class ConceptManager {
             ]);
 
             dv.table(headers, rows);
+            if (showTimestamp) this._renderTimestamp({ dv });
         }
     }
 
@@ -2985,7 +3027,7 @@ class ConceptManager {
      * @param {number} [params.headerLevel=2] - The level for the header (1-6)
      * @param {boolean} [params.debug=false] - Show detailed debug output
      */
-    generateConceptsAnalysis({ dv, relationTypes = null, headerLevel = 2, debug = false }) {
+    generateConceptsAnalysis({ dv, relationTypes = null, headerLevel = 2, debug = false, showTimestamp = false }) {
         try {
             const currentPage = dv.current();
             const currentSubject = currentPage.subject;
@@ -3104,7 +3146,8 @@ class ConceptManager {
                 dv,
                 relationTypes,
                 headerLevel,
-                debug
+                debug,
+                showTimestamp
             });
 
             // End of reorder block
@@ -3115,7 +3158,8 @@ class ConceptManager {
                 relationTypes,
                 validSubjects,
                 headerLevel,
-                debug
+                debug,
+                showTimestamp
             });
         } catch (error) {
             dv.header(headerLevel, "⚠️ Error Loading Content");
@@ -3173,7 +3217,7 @@ class ConceptManager {
      * });
      * ```
      */
-    generateSmartView({ dv, headerLevel = 2, enabledSteps = ['directConnections', 'relatedContent', 'relatedHubs'], debug = false }) {
+    generateSmartView({ dv, headerLevel = 2, enabledSteps = ['directConnections', 'relatedContent', 'relatedHubs'], debug = false, showTimestamp = true }) {
         try {
             if (debug) {
                 dv.header(headerLevel, "🔬 Smart View Generator - Debug Mode");
@@ -3250,7 +3294,7 @@ class ConceptManager {
                 dv.paragraph("");
                 let headerText = `Key Connections (n)`;
                 if (debug) dv.paragraph(`**Executing Group (Concept/Core Pattern) Items List...**`);
-                this.generateGroupItemsList({ dv, headerLevel, headerText, debug: debug });
+                this.generateGroupItemsList({ dv, headerLevel, headerText, debug: debug, showTimestamp });
                 viewsGenerated++;
                 if (debug) { dv.paragraph(`✅ Group (Concept/Core Pattern) items list completed. Views generated so far: ${viewsGenerated}`); dv.paragraph("---"); }
             } else if (debug) {
@@ -3276,7 +3320,7 @@ class ConceptManager {
             if (shouldRunConceptAnalysis) {
                 const relationTypes = configData.validFilters || [];
                 if (debug) { dv.paragraph(`Relation types to use: ${relationTypes.length > 0 ? relationTypes.join(', ') : "none (will use defaults)"}`); dv.paragraph("---"); }
-                this.generateConceptsAnalysis({ dv, relationTypes, headerLevel: headerLevel, debug: debug });
+                this.generateConceptsAnalysis({ dv, relationTypes, headerLevel: headerLevel, debug: debug, showTimestamp });
                 viewsGenerated++;
                 if (debug) { dv.paragraph(`✅ Concept Analysis completed. Views generated so far: ${viewsGenerated}`); dv.paragraph("---"); }
             } else if (debug) {
@@ -3311,7 +3355,8 @@ class ConceptManager {
                 this.generateViewTable({ 
                     dv, 
                     headerLevel,
-                    debug: debug
+                    debug: debug,
+                    showTimestamp
                 });
                 
                 viewsGenerated++;
