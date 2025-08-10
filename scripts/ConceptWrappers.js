@@ -222,7 +222,8 @@ class ConceptWrappers {
      * @param {Object} options - Rendering options.
      * @param {Array<string>} [options.sections=['directConnections','relatedContent','relatedHubs']] - Sections to run.
      * @param {number} [options.headerLevel=2] - Header level passed through to ConceptManager.
-     * @param {number} [options.concurrency=4] - Number of parallel section workers (1 = sequential).
+     * @param {number} [options.concurrency=2] - Number of parallel section workers (1 = sequential).
+     * @param {Array<string>} [options.prioritySections=[]] - Build scheduling priority (visual order unchanged).
      * @param {boolean} [options.debug=false] - Enable wrapper-level debug logs.
      * @param {number} [options.observeQuietMs=200] - Required quiet period (ms) before commit.
      * @param {number} [options.observeMaxWaitMs=3000] - Hard cap (ms) to force commit.
@@ -230,7 +231,7 @@ class ConceptWrappers {
      * @param {boolean} [options.showTimestamp=true] - Pass-through to ConceptManager.
      * @param {boolean} [options.showTimeBuild=true] - Pass-through to ConceptManager.
      */
-    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 1, debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = true } = {}) {
+    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 2, prioritySections = [], debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = false } = {}) {
         const { ConceptManager } = customJS;
 
         // Root container and ordered slots
@@ -247,6 +248,7 @@ class ConceptWrappers {
                 sections,
                 headerLevel,
                 concurrency,
+                prioritySections,
                 observeQuietMs,
                 observeMaxWaitMs,
                 sourcePath
@@ -279,7 +281,7 @@ class ConceptWrappers {
         });
 
         // Create per-section tasks (each builds off-screen and commits when settled)
-        const tasks = sections.map((section, index) => () => new Promise((resolve) => {
+        const taskTuples = sections.map((section, index) => ({ section, index, run: () => new Promise((resolve) => {
             // Yield to let placeholders paint
             setTimeout(() => {
                 let staging = null;
@@ -379,6 +381,29 @@ class ConceptWrappers {
                                             const labels = slots[index].querySelectorAll('[data-ocm-ts] .ocm-ts-label');
                                             labels.forEach(node => { node.textContent = 'Updated at'; });
                                         }
+                                        // Enrich timestamp with settle time (only when showTimeBuild is true)
+                                        if (showTimeBuild) {
+                                            const tsNode = slots[index].querySelector('[data-ocm-ts]');
+                                            if (tsNode) {
+                                                const extra = tsNode.querySelector('.ocm-ts-extra');
+                                                const buildAttr = tsNode.getAttribute('data-ocm-build-ms');
+                                                const buildMs = buildAttr ? Number(buildAttr) : null;
+                                                const settleMs = Math.round(waited);
+                                                const parts = [];
+                                                if (typeof buildMs === 'number' && isFinite(buildMs)) parts.push(`build: ${buildMs}ms`);
+                                                parts.push(`settle: ${settleMs}ms`);
+                                                if (extra) {
+                                                    extra.textContent = `(${parts.join(', ')})`;
+                                                } else {
+                                                    const span = document.createElement('span');
+                                                    span.className = 'ocm-ts-extra';
+                                                    span.textContent = `(${parts.join(', ')})`;
+                                                    tsNode.appendChild(document.createTextNode(' '));
+                                                    tsNode.appendChild(span);
+                                                }
+                                                tsNode.setAttribute('data-ocm-settle-ms', String(settleMs));
+                                            }
+                                        }
                                     } catch (_) { /* ignore */ }
                                     slots[index].style.display = '';
                                     slots[index].style.minHeight = '1em';
@@ -395,8 +420,35 @@ class ConceptWrappers {
                                 // Prime cache if missing so future runs don't show loading
                                 if (!hadCache) this._smarterCache.set(key, '');
                                 if (debug && console && console.log) console.log('[SmarterView] unchanged (still empty, collapsed)', { section, index });
-                            } else if (debug && console && console.log) {
-                                console.log('[SmarterView] unchanged', { section, index });
+                            } else {
+                                // Unchanged: keep UI as-is; optionally enrich settle time only when showTimeBuild is true
+                                try {
+                                    if (showTimeBuild) {
+                                        const tsNode = slots[index].querySelector('[data-ocm-ts]');
+                                        if (tsNode) {
+                                            const extra = tsNode.querySelector('.ocm-ts-extra');
+                                            const buildAttr = tsNode.getAttribute('data-ocm-build-ms');
+                                            const buildMs = buildAttr ? Number(buildAttr) : null;
+                                            const settleMs = Math.round(waited);
+                                            const parts = [];
+                                            if (typeof buildMs === 'number' && isFinite(buildMs)) parts.push(`build: ${buildMs}ms`);
+                                            parts.push(`settle: ${settleMs}ms`);
+                                            if (extra) {
+                                                extra.textContent = `(${parts.join(', ')})`;
+                                            } else {
+                                                const span = document.createElement('span');
+                                                span.className = 'ocm-ts-extra';
+                                                span.textContent = `(${parts.join(', ')})`;
+                                                tsNode.appendChild(document.createTextNode(' '));
+                                                tsNode.appendChild(span);
+                                            }
+                                            tsNode.setAttribute('data-ocm-settle-ms', String(settleMs));
+                                        }
+                                    }
+                                } catch (_) { /* ignore */ }
+                                if (debug && console && console.log) {
+                                    console.log('[SmarterView] unchanged', { section, index });
+                                }
                             }
                             if (staging && staging.parentNode) staging.parentNode.removeChild(staging);
                             if (debug && console && console.log) console.log('[SmarterView] done', { section, index, ms: Math.round(waited) });
@@ -415,7 +467,17 @@ class ConceptWrappers {
                     resolve();
                 }
             }, 0);
-        }));
+        }) }));
+
+        // Reorder tasks by scheduling priority while keeping visual order of slots unchanged
+        const prioritySet = new Set(Array.isArray(prioritySections) ? prioritySections : []);
+        const orderedTaskTuples = [...taskTuples].sort((a, b) => {
+            const aPr = prioritySet.has(a.section) ? 0 : 1;
+            const bPr = prioritySet.has(b.section) ? 0 : 1;
+            if (aPr !== bPr) return aPr - bPr; // priority first
+            return a.index - b.index;          // then original order
+        });
+        const tasks = orderedTaskTuples.map(t => t.run);
 
         // Run with a simple concurrency limiter (queue + N workers)
         const runWithConcurrency = (fns, limit) => {
@@ -440,4 +502,5 @@ class ConceptWrappers {
     // - renderGroupSmartView
 
 }
+
 

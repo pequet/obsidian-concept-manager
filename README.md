@@ -26,9 +26,10 @@ ConceptWrappers.renderSmarterView(dv);
 // ConceptWrappers.renderSmarterView(dv, {
 //   headerLevel: 2,
 //   sections: ['directConnections', 'relatedContent', 'relatedHubs'],
-//   concurrency: 2,          // 1 = sequential, >1 = interleaved builds
-//   observeQuietMs: 200,     // commit after DOM stays quiet this long
-//   observeMaxWaitMs: 3000,  // hard cap to commit
+//   prioritySections: ['directConnections', 'relatedHubs'],            // build these section first (visual order unchanged)
+//   concurrency: 2,                                                    // single‑threaded interleaving at yield points
+//   observeQuietMs: 200,                                               // commit after DOM stays quiet this long (think: tables rendering, etc)
+//   observeMaxWaitMs: 3000,                                            // hard cap to commit
 //   collapseEmptySections: true,
 //   debug: false
 // });
@@ -96,6 +97,12 @@ ConceptWrappers.renderSmarterView(dv)
 const { ConceptManager } = customJS;
 ConceptManager.generateSmartView({ dv, enabledSteps: ['relatedContent', 'directConnections', 'relatedHubs'] });
 ```
+
+### Concurrency and Priority (How it behaves)
+
+- Single-threaded reality: Obsidian JS runs on one main thread. Concurrency>1 does not run CPU in parallel: it allows interleaving when work yields (rendering/microtasks). Purely synchronous work still runs sequentially.
+- Concretely, this means that start time beats duration: even with concurrency>1, the section that starts earlier will block the other sections that, even shorter, will appear later.
+- Priority scheduling: Use `prioritySections` to start certain sections earlier.
 
 ### 3. Deep API: getRelatedConcepts (full control)
 

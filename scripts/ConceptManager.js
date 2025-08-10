@@ -233,9 +233,16 @@ class ConceptManager {
      _renderTimestamp({ dv, label = 'Rendered at', durationMs = null } = {}) {
          if (!dv) return;
          const ts = this._formatTimestamp(new Date());
-         const durationText = (typeof durationMs === 'number' && isFinite(durationMs)) ? ` (${Math.round(durationMs)}ms)` : '';
-         // Use HTML to get a subtle, grey style; tag with data attributes for diff-ignoring
-         dv.paragraph(`<div data-ocm-ts="1" class="ocm-ts" style="color:#888; font-size:0.9em; margin-top:6px;"><span class="ocm-ts-label">${label}</span>: <span class="ocm-ts-time">${ts}</span>${durationText}</div>`);
+         const hasBuild = (typeof durationMs === 'number' && isFinite(durationMs));
+         const buildMs = hasBuild ? Math.round(durationMs) : null;
+         const buildAttr = hasBuild ? ` data-ocm-build-ms="${buildMs}"` : '';
+         const extraText = hasBuild ? `(build: ${buildMs}ms)` : '';
+         dv.paragraph(
+             `<div data-ocm-ts="1" class="ocm-ts"${buildAttr} style="color:#888; font-size:0.9em; margin-top:6px;">
+                 <span class="ocm-ts-label">${label}</span>: <span class="ocm-ts-time">${ts}</span>
+                 <span class="ocm-ts-extra">${extraText}</span>
+              </div>`
+         );
      }
 
     enableConfigMemoization({ enabled = true, ttlMs = 0 } = {}) {
@@ -3482,3 +3489,5 @@ class ConceptManager {
         }
     }
 } 
+
+
