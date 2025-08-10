@@ -36,23 +36,15 @@
  *   ```
  * 
  *   - Smart View Generator (Recommended)
- *     Runs an adaptive view that analyzes the page and renders:
- *       1) Concept Analysis, 2) Group Items List, 3) View Table
- *     (Steps 2–3 run when the page has suitable frontmatter. Control steps via `enabledSteps`.)
+ *     Renders in this order on concept pages: Classifications → Key Connections → Related Content → Related Hubs
  *   ```dataviewjs
  *   const { ConceptManager } = customJS;
  *   ConceptManager.generateSmartView({ 
  *     dv,
  *     headerLevel: 2,
- *     enabledSteps: ['relatedContent', 'directConnections', 'relatedHubs'],
+ *     enabledSteps: ['contentClassifications','keyConnections','relatedContent','relatedHubs'],
  *     debug: false
  *   });
- * 
- *   // Lightweight mode (concept analysis only)
- *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['relatedContent'] });
- * 
- *   // Group-focused mode (items + relationships only)
- *   // ConceptManager.generateSmartView({ dv, enabledSteps: ['directConnections', 'relatedHubs'] });
  *   ```
  * 
  *   - Wrapper-Based (Optional)
@@ -2571,16 +2563,20 @@ class ConceptManager {
 
     /**
      * Helper: Render the Classifications section for the provided relation types
-     * This corresponds to "Step 3!!!!" that displays organized sections per relation type
+     * Displays organized sections per relation type
      *
      * @param {Object} params
      * @param {Object} params.dv - The dataview API object
      * @param {Array<string>} params.relationTypes - Clean relation type names (without "group-" prefix)
      * @param {number} [params.headerLevel=2] - Header level to use
      * @param {string} [params.subject] - Subject to use when resolving display names (defaults to current page's subject)
+     * @param {boolean} [params.showTable=false] - Whether to render the aggregate table in addition to bullets
      * @param {boolean} [params.debug=false] - Enable debug logging
+     * @param {boolean} [params.showTimestamp=false] - Render a timestamp footer for this section
+     * @param {boolean} [params.showTimeBuild=false] - Include build duration in timestamp (wrapper augments with settle time)
      */
-    renderConceptClassifications({ dv, relationTypes, headerLevel = 2, subject, showTable = false, debug = false }) {
+    renderConceptClassifications({ dv, relationTypes, headerLevel = 2, subject, showTable = false, debug = false, showTimestamp = false, showTimeBuild = false }) {
+        const __buildStart = this._getNowMs();
         const currentPage = dv.current();
         const currentSubject = subject || currentPage.subject;
 
@@ -2798,6 +2794,10 @@ class ConceptManager {
 
                 dv.table(headers, rows);
             }
+        }
+        // Timestamp footer (below bullets/table) when section is present
+        if (presentTypes.length > 0 && showTimestamp) {
+            this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
         }
     }
 
@@ -3197,20 +3197,18 @@ class ConceptManager {
      * ## Processing Steps:
      * 1. **Page Analysis**: Analyzes current page metadata (domain, subject, type, domain-category)
      * 2. **Config Lookup**: Searches for config file with matching subject to get valid_filters for relation types
-     * 3. **Concept Analysis**: If domain is "concepts" or "patterns", calls `generateConceptsAnalysis()` 
-     *    - Shows which groups this concept belongs to + finds related concepts
-     * 4. **Group Items List**: If page has "domain-category", calls `generateGroupItemsList()`
-     *    - Shows all items that belong to this group (e.g., all movies from 1995)
-     * 5. **View Table**: If page has "domain-category", calls `generateViewTable()`
-     *    - Shows related groups and hub relationships based on domain-category
-     * 
-     * Note: Step 4 runs only if Step 3 did not run (to avoid duplicate Key Connections).
-     * 
-     * ## Step Selection:
-     * You can control which steps execute using the `enabledSteps` parameter:
-     * - `relatedContent`: Step 3 - Shows concept relationships and groups
-     * - `directConnections`: Step 4 - Shows items belonging to this group  
-     * - `relatedHubs`: Step 5 - Shows group relationships and hubs
+            * 3. **Content Classifications** (concept pages): Calls `renderConceptClassifications()`
+            * 4. **Key Connections** (concept pages): Calls `renderKeyConnectionsForConcept()`
+            * 5. **Related Content** (concept pages): Calls `renderTopRelatedContent()`
+            * 6. **View Table** (pages with domain-category): Calls `generateViewTable()`
+            *    - Shows related groups and hub relationships based on domain-category
+            * 
+            * ## Step Selection:
+            * You can control which steps execute using the `enabledSteps` parameter:
+            * - `contentClassifications` (concept pages only)
+            * - `keyConnections` (concept pages only)
+            * - `relatedContent` (concept pages only)
+            * - `relatedHubs` (requires domain-category)
      * 
      * @param {Object} params - Parameters object
      * @param {Object} params.dv - The Dataview API object
@@ -3236,7 +3234,7 @@ class ConceptManager {
      * });
      * ```
      */
-    generateSmartView({ dv, headerLevel = 2, enabledSteps = ['directConnections', 'relatedContent', 'relatedHubs'], debug = false, showTimestamp = true, showTimeBuild = true }) {
+     generateSmartView({ dv, headerLevel = 2, enabledSteps = ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'], debug = false, showTimestamp = true, showTimeBuild = true }) {
         try {
             if (debug) {
                 dv.header(headerLevel, "🔬 Smart View Generator - Debug Mode");
@@ -3295,55 +3293,59 @@ class ConceptManager {
 
             let viewsGenerated = 0;
 
-            // New order: Direct Connections → Concept Analysis → Related Hubs
+            // New order: Classifications → Key Connections → Related Content → Related Hubs
 
-            // Direct Connections (Group Items) FIRST
-            const step4Enabled = enabledSteps.includes('directConnections');
-            const hasDomainCategory = !!currentPage["domain-category"];
-            const shouldRunGroupItems = step4Enabled && hasDomainCategory;
+            // Determine eligibility once
+            const domainIsConceptual = currentPage.domain === "concepts" || currentPage.domain === "patterns";
 
+            // Section: contentClassifications
+            const classificationsEnabled = enabledSteps.includes('contentClassifications') && domainIsConceptual;
             if (debug) {
-                dv.paragraph(`**Direct Connections Check**`);
-                dv.paragraph(`Step enabled: ${step4Enabled ? "Yes" : "No"}`);
-                dv.paragraph(`Has domain-category: ${hasDomainCategory ? "Yes" : "No"}`);
-                dv.paragraph(`Should run Group (Concept/Core Pattern) items list: ${shouldRunGroupItems ? "Yes" : "No"}`);
+                dv.paragraph(`**Content Classifications Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('contentClassifications') ? "Yes" : "No"}`);
+                dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Classifications: ${classificationsEnabled ? "Yes" : "No"}`);
             }
-
-            if (shouldRunGroupItems) {
-                dv.paragraph("");
-                let headerText = `Key Connections (n)`;
-                if (debug) dv.paragraph(`**Executing Group (Concept/Core Pattern) Items List...**`);
-                this.generateGroupItemsList({ dv, headerLevel, headerText, debug: debug, showTimestamp, showTimeBuild });
+            if (classificationsEnabled) {
+                const relationTypes = configData.validFilters || [];
+                this.renderConceptClassifications({ dv, relationTypes, headerLevel, subject: currentPage.subject, showTable: false, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
-                if (debug) { dv.paragraph(`✅ Group (Concept/Core Pattern) items list completed. Views generated so far: ${viewsGenerated}`); dv.paragraph("---"); }
             } else if (debug) {
-                const reason = !step4Enabled ? "step disabled by user" : "no domain-category found";
-                dv.paragraph(`❌ Skipping Group (Concept/Core Pattern) items list - ${reason}`);
+                dv.paragraph(`❌ Skipping Classifications`);
                 dv.paragraph("---");
             }
 
-            // Concept Analysis (Related Content) SECOND
-            const stepEnabled = enabledSteps.includes('relatedContent');
-            const domainRequirementMet = currentPage.domain === "concepts" || currentPage.domain === "patterns";
-            const shouldRunConceptAnalysis = stepEnabled && domainRequirementMet;
-
+            // Section: keyConnections
+            const keyConnectionsEnabled = enabledSteps.includes('keyConnections') && domainIsConceptual;
             if (debug) {
-                dv.paragraph(`**Concept Analysis Check**`);
-                dv.paragraph(`Step enabled: ${stepEnabled ? "Yes" : "No"}`);
-                dv.paragraph(`Current domain: ${currentPage.domain}`);
-                dv.paragraph(`Domain requirement met: ${domainRequirementMet ? "Yes" : "No"}`);
-                dv.paragraph(`Should run Concept Analysis: ${shouldRunConceptAnalysis ? "Yes" : "No"}`);
-                dv.paragraph(`Reasoning: ${!stepEnabled ? "Step disabled by enabledSteps parameter" : !domainRequirementMet ? `Domain is "${currentPage.domain || 'undefined'}" (requires "concepts" or "patterns")` : "All requirements met"}`);
+                dv.paragraph(`**Key Connections Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('keyConnections') ? "Yes" : "No"}`);
+                dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Key Connections: ${keyConnectionsEnabled ? "Yes" : "No"}`);
+            }
+            if (keyConnectionsEnabled) {
+                const relationTypes = configData.validFilters || [];
+                this.renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel, debug, showTimestamp, showTimeBuild });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Key Connections`);
+                dv.paragraph("---");
             }
 
-            if (shouldRunConceptAnalysis) {
+            // Section: relatedContent
+            const relatedContentEnabled = enabledSteps.includes('relatedContent') && domainIsConceptual;
+            if (debug) {
+                dv.paragraph(`**Related Content Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('relatedContent') ? "Yes" : "No"}`);
+                dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Related Content: ${relatedContentEnabled ? "Yes" : "No"}`);
+            }
+            if (relatedContentEnabled) {
                 const relationTypes = configData.validFilters || [];
-                if (debug) { dv.paragraph(`Relation types to use: ${relationTypes.length > 0 ? relationTypes.join(', ') : "none (will use defaults)"}`); dv.paragraph("---"); }
-                this.generateConceptsAnalysis({ dv, relationTypes, headerLevel: headerLevel, debug: debug, showTimestamp, showTimeBuild });
+                this.renderTopRelatedContent({ dv, relationTypes, headerLevel, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
-                if (debug) { dv.paragraph(`✅ Concept Analysis completed. Views generated so far: ${viewsGenerated}`); dv.paragraph("---"); }
             } else if (debug) {
-                dv.paragraph(`❌ Skipping Concept Analysis - ${!stepEnabled ? "step disabled by user" : "domain requirements not met"}`);
+                dv.paragraph(`❌ Skipping Related Content`);
                 dv.paragraph("---");
             }
             
@@ -3355,7 +3357,7 @@ class ConceptManager {
             const shouldRunViewTable = step5Enabled && hasDomainCategoryForTable;
             
             if (debug) {
-                dv.paragraph(`**Step 5: View Table (Group Relationships) Check**`);
+                dv.paragraph(`**Step 4: View Table (Group Relationships) Check**`);
                 dv.paragraph(`Step enabled: ${step5Enabled ? "Yes" : "No"}`);
                 dv.paragraph(`Has domain-category: ${hasDomainCategoryForTable ? "Yes" : "No"}`);
                 dv.paragraph(`Should run view table: ${shouldRunViewTable ? "Yes" : "No"}`);
@@ -3395,48 +3397,52 @@ class ConceptManager {
             // Final summary
             if (debug) {
                 dv.paragraph(`**📊 COMPREHENSIVE FINAL SUMMARY**`);
-                dv.paragraph(`Total views generated: ${viewsGenerated} out of 3 possible views`);
+                dv.paragraph(`Total views generated: ${viewsGenerated} out of 4 possible views`);
                 dv.paragraph("");
                 
                 dv.paragraph(`**🔍 ALL VIEWS CONSIDERED AND THEIR STATUS:**`);
                 
-                // View 1: Concept Analysis
-                dv.paragraph(`**1. Concept Analysis:**`);
-                if (shouldRunConceptAnalysis) {
+                // View 1: Content Classifications
+                dv.paragraph(`**1. Content Classifications:**`);
+                if (classificationsEnabled) {
                     dv.paragraph(`   ✅ **EXECUTED** - All requirements met`);
-                    dv.paragraph(`   📋 Step enabled: ${stepEnabled}, Domain: "${currentPage.domain}"`);
                 } else {
-                    dv.paragraph(`   ❌ **SKIPPED** - ${!stepEnabled ? "Step disabled by user" : "Domain requirement not met"}`);
-                    if (!stepEnabled) {
-                        dv.paragraph(`   📋 Reason: 'relatedContent' not in enabledSteps parameter`);
-                        dv.paragraph(`   🔧 Fix: Add 'relatedContent' to enabledSteps array`);
-                    } else {
-                        dv.paragraph(`   📋 Reason: Page domain is "${currentPage.domain || 'undefined'}" (requires "concepts" or "patterns")`);
+                    dv.paragraph(`   ❌ **SKIPPED** - ${!enabledSteps.includes('contentClassifications') ? "Step disabled by user" : !domainIsConceptual ? "Domain requirement not met" : "Other conditions not met"}`);
+                    if (!enabledSteps.includes('contentClassifications')) {
+                        dv.paragraph(`   🔧 Fix: Add 'contentClassifications' to enabledSteps array`);
+                    } else if (!domainIsConceptual) {
                         dv.paragraph(`   🔧 Fix: Set domain to "concepts" or "patterns" in frontmatter`);
                     }
                 }
                 
-                // View 2: Group Items List  
-                dv.paragraph(`**2. Group (Concept/Core Pattern) Items List:**`);
-                if (shouldRunGroupItems) {
+                // View 2: Key Connections
+                dv.paragraph(`**2. Key Connections:**`);
+                if (keyConnectionsEnabled) {
                     dv.paragraph(`   ✅ **EXECUTED** - All requirements met`);
-                    dv.paragraph(`   📋 Step enabled: ${step4Enabled}, Has domain-category: ${hasDomainCategory}`);
                 } else {
-                    const skippedReason = !step4Enabled ? "Step disabled by user" : !hasDomainCategory ? "Missing domain-category field" : "Rendered inside Concept Analysis (avoided duplicate)";
-                    dv.paragraph(`   ❌ **SKIPPED** - ${skippedReason}`);
-                    if (!step4Enabled) {
-                        dv.paragraph(`   📋 Reason: 'directConnections' not in enabledSteps parameter`);
-                        dv.paragraph(`   🔧 Fix: Add 'directConnections' to enabledSteps array`);
-                    } else if (!hasDomainCategory) {
-                        dv.paragraph(`   📋 Reason: Page does not have "domain-category" in frontmatter`);
-                        dv.paragraph(`   🔧 Fix: Add "domain-category: [category-name]" to frontmatter`);
-                    } else {
-                        dv.paragraph(`   📋 Reason: Concept Analysis was executed and already rendered Key Connections`);
+                    dv.paragraph(`   ❌ **SKIPPED** - ${!enabledSteps.includes('keyConnections') ? "Step disabled by user" : !domainIsConceptual ? "Domain requirement not met" : "Other conditions not met"}`);
+                    if (!enabledSteps.includes('keyConnections')) {
+                        dv.paragraph(`   🔧 Fix: Add 'keyConnections' to enabledSteps array`);
+                    } else if (!domainIsConceptual) {
+                        dv.paragraph(`   🔧 Fix: Set domain to "concepts" or "patterns" in frontmatter`);
                     }
                 }
                 
-                // View 3: View Table
-                dv.paragraph(`**3. View Table (Group Relationships):**`);
+                // View 3: Related Content
+                dv.paragraph(`**3. Related Content:**`);
+                if (relatedContentEnabled) {
+                    dv.paragraph(`   ✅ **EXECUTED** - All requirements met`);
+                } else {
+                    dv.paragraph(`   ❌ **SKIPPED** - ${!enabledSteps.includes('relatedContent') ? "Step disabled by user" : !domainIsConceptual ? "Domain requirement not met" : "Other conditions not met"}`);
+                    if (!enabledSteps.includes('relatedContent')) {
+                        dv.paragraph(`   🔧 Fix: Add 'relatedContent' to enabledSteps array`);
+                    } else if (!domainIsConceptual) {
+                        dv.paragraph(`   🔧 Fix: Set domain to "concepts" or "patterns" in frontmatter`);
+                    }
+                }
+                
+                // View 4: View Table (Group Relationships)
+                dv.paragraph(`**4. View Table (Group Relationships):**`);
                 if (shouldRunViewTable) {
                     dv.paragraph(`   ✅ **EXECUTED** - All requirements met`);
                     dv.paragraph(`   📋 Step enabled: ${step5Enabled}, Has domain-category: ${hasDomainCategoryForTable}`);
@@ -3454,19 +3460,19 @@ class ConceptManager {
                 dv.paragraph("");
                 dv.paragraph(`**📈 EXECUTION SUMMARY:**`);
                 dv.paragraph(`  • Views executed: ${viewsGenerated}`);
-                dv.paragraph(`  • Views skipped: ${3 - viewsGenerated}`);
-                dv.paragraph(`  • Success rate: ${Math.round((viewsGenerated / 3) * 100)}%`);
+                dv.paragraph(`  • Views skipped: ${4 - viewsGenerated}`);
+                dv.paragraph(`  • Success rate: ${Math.round((viewsGenerated / 4) * 100)}%`);
                 
                 if (viewsGenerated === 0) {
                     dv.paragraph("");
                     dv.paragraph(`⚠️ **NO VIEWS EXECUTED** - Either steps are disabled or page doesn't meet requirements`);
                     dv.paragraph(`**Potential fixes:**`);
-                    dv.paragraph(`  • Enable more steps: Add 'relatedContent', 'directConnections', or 'relatedHubs' to enabledSteps`);
-                    dv.paragraph(`  • For Concept Analysis: Add domain: "concepts" or domain: "patterns"`);
-                    dv.paragraph(`  • For Group views: Add domain-category: [category-name]`);
-                } else if (viewsGenerated < 3) {
+                    dv.paragraph(`  • Enable more steps: Add 'contentClassifications', 'keyConnections', 'relatedContent', or 'relatedHubs' to enabledSteps`);
+                    dv.paragraph(`  • For concept-only steps: Add domain: "concepts" or "patterns"`);
+                    dv.paragraph(`  • For group views: Add domain-category: [category-name]`);
+                } else if (viewsGenerated < 4) {
                     dv.paragraph("");
-                    dv.paragraph(`💡 **OPTIMIZATION OPPORTUNITY:** ${3 - viewsGenerated} additional view(s) could be enabled`);
+                    dv.paragraph(`💡 **OPTIMIZATION OPPORTUNITY:** ${4 - viewsGenerated} additional view(s) could be enabled`);
                     dv.paragraph(`Check the step analysis above for specific requirements.`);
                 }
                 

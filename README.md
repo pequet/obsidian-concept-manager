@@ -25,11 +25,11 @@ ConceptWrappers.renderSmarterView(dv);
 // Optional overrides
 // ConceptWrappers.renderSmarterView(dv, {
 //   headerLevel: 2,
-//   sections: ['directConnections', 'relatedContent', 'relatedHubs'],
-//   prioritySections: ['directConnections', 'relatedHubs'],            // build these section first (visual order unchanged)
-//   concurrency: 2,                                                    // single‑threaded interleaving at yield points
-//   observeQuietMs: 200,                                               // commit after DOM stays quiet this long (think: tables rendering, etc)
-//   observeMaxWaitMs: 3000,                                            // hard cap to commit
+//   sections: ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'],
+//   prioritySections: [],                                              // Build these first (visual order unchanged)
+//   concurrency: 2,                                                    // Single‑threaded interleaving at yield points
+//   observeQuietMs: 200,                                               // Commit after DOM stays quiet this long (think: tables rendering, etc)
+//   observeMaxWaitMs: 3000,                                            // Hard cap to commit
 //   collapseEmptySections: true,
 //   debug: false
 // });
@@ -95,7 +95,7 @@ ConceptWrappers.renderSmarterView(dv)
 
 ```dataviewjs
 const { ConceptManager } = customJS;
-ConceptManager.generateSmartView({ dv, enabledSteps: ['relatedContent', 'directConnections', 'relatedHubs'] });
+ConceptManager.generateSmartView({ dv, enabledSteps: ['contentClassifications','keyConnections','relatedContent','relatedHubs'] });
 ```
 
 ### Concurrency and Priority (How it behaves)

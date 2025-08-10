@@ -22,12 +22,12 @@
  *   ```dataviewjs
  *   const { ConceptWrappers } = customJS;
  *
- *   // Zero-config: renders Direct Connections, Related Content, Related Hubs
+ *   // Zero-config: renders Classifications, Key Connections, Related Content, Related Hubs
  *   ConceptWrappers.renderSmarterView(dv);
  *
  *   // Optional overrides
  *   // ConceptWrappers.renderSmarterView(dv, {
- *   //     sections: ['directConnections', 'relatedContent', 'relatedHubs'],
+ *   //     sections: ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'],
  *   //     headerLevel: 2,
  *   //     concurrency: 2,              // 1 = sequential, >1 = interleaved builds
  *   //     observeQuietMs: 200,         // commit after DOM stays quiet for this long
@@ -231,7 +231,7 @@ class ConceptWrappers {
      * @param {boolean} [options.showTimestamp=true] - Pass-through to ConceptManager.
      * @param {boolean} [options.showTimeBuild=true] - Pass-through to ConceptManager.
      */
-    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 2, prioritySections = [], debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = false } = {}) {
+     renderSmarterView(dv, { sections = ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 2, prioritySections = [], debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = false } = {}) {
         const { ConceptManager } = customJS;
 
         // Root container and ordered slots
@@ -239,7 +239,8 @@ class ConceptWrappers {
         const sourcePath = dv.current()?.file?.path || '/';
         const makeKey = (section) => `${sourcePath}::${section}::h${headerLevel}`;
         const SECTION_LABELS = {
-            directConnections: 'Key Connections',
+            contentClassifications: 'Classifications',
+            keyConnections: 'Key Connections',
             relatedContent: 'Related Content',
             relatedHubs: 'Related Hubs'
         };
@@ -272,7 +273,7 @@ class ConceptWrappers {
                     // Rehydrate cached HTML; keep as-is (contains timestamps)
                     slot.innerHTML = cached;
                 }
-            } else if (debug) {
+            } else {
                 const label = SECTION_LABELS[section] || section;
                 slot.textContent = `Loading ${label}…`;
             }
