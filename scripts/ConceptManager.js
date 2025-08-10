@@ -1756,13 +1756,9 @@ class ConceptManager {
                 throw new Error("Could not access the current page metadata");
             }
             
-            // Check if we have the required fields
+            // If domain-category is missing, silently no-op per user request
             if (!currentPage["domain-category"]) {
-                if (debug) {
-                    dv.paragraph(`❌ **Missing required metadata:** No domain-category found in frontmatter`);
-                    dv.paragraph(`**Available frontmatter fields:** ${Object.keys(currentPage).filter(k => k !== 'file' && typeof currentPage[k] !== 'function').join(', ')}`);
-                }
-                throw new Error("Missing required metadata: No domain-category found in frontmatter");
+                return;
             }
             
             // Get and normalize the domain category key
@@ -2133,7 +2129,8 @@ class ConceptManager {
                         }
                     } 
                 } else {
-                    dv.paragraph("*No Hub pages found for this Domain Category. Please create a Hub page with matching domain-category.*");
+                    // Silently no-op when no hubs are found for this domain-category
+                    return;
                 }
             }
         } catch (error) {
@@ -2273,11 +2270,8 @@ class ConceptManager {
             }
             
             if (!groupTypes || groupTypes.length === 0) {
-                if (debug) {
-                    dv.paragraph(`❌ **ERROR:** No Group (Concept/Core Pattern) types available`);
-                    dv.paragraph(`**Available frontmatter fields:** ${Object.keys(currentPage).filter(k => k !== 'file' && typeof currentPage[k] !== 'function').join(', ')}`);
-                }
-                throw new Error("No Group (Concept/Core Pattern) type specified and couldn't determine from page's domain-category");
+                // Silently return with no output when no group types are available
+                return;
             }
             
             // The group value is the current page's name
@@ -2436,20 +2430,19 @@ class ConceptManager {
                     dv.paragraph("---");
                 }
                 
-                // Render per-category subheader one level deeper than wrapper header
-                if (headerLevel > 0) {
-                    const subHeaderLevel = Math.min(6, headerLevel + 1);
-                    const relationLabel = this.getRelationLabel({
-                        dv,
-                        domainCategory: type,
-                        subject: currentPage.subject,
-                        direction: 'outgoing',
-                        debug
-                    });
-                    dv.header(subHeaderLevel, relationLabel);
-                }
-                
+                // Only render section (subheader + list) when there are matches
                 if (matchingPages.length > 0) {
+                    if (headerLevel > 0) {
+                        const subHeaderLevel = Math.min(6, headerLevel + 1);
+                        const relationLabel = this.getRelationLabel({
+                            dv,
+                            domainCategory: type,
+                            subject: currentPage.subject,
+                            direction: 'outgoing',
+                            debug
+                        });
+                        dv.header(subHeaderLevel, relationLabel);
+                    }
                     // Create a list of matching pages with their summaries
                     const listItems = matchingPages.map(page => {
                         const title = page.file.name;
@@ -2458,8 +2451,6 @@ class ConceptManager {
                     });
                     
                     dv.list(listItems);
-                } else {
-                    dv.paragraph(`*No items found with ${groupFieldName}: "${groupValue}". See debug info above for details.*`);
                 }
             });
         } catch (error) {
