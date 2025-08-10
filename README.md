@@ -12,23 +12,26 @@ This is a CustomJS Class designed for **advanced content discovery** and **workf
  - Proportional weighting for direct and reverse relationships
  - Proximity-weighted path scoring (rewards filesystem adjacency as a proxy for structural organization)
 
-## The Game Changer: Single-Entry Wrapper Functions
+## The Game Changer: Smarter Wrapper (Zero‑Config)
 
-While you can 'raw‑dog' it by calling the raw `ConceptManager` API directly, the simplest way, and only one you should need, is to use this system everywhere is the wrapper’s single, zero‑config method. This means paste this on every page you want to use it on, whether it is a Hub, Group, or a standalone Concept page.
+While you can 'raw‑dog' it by calling the raw `ConceptManager` API directly, the simplest way, and only one you should need, is to use the new `renderSmarterView` wrapper everywhere. It supersedes older helper wrappers and removes the need for per‑page tuning. Paste one line at the bottom of any Hub or Concept page and it will adapt, stream each section as it’s ready, and only update when content meaningfully changes (no flicker, even with Dataview auto‑refresh).
 
 ```dataviewjs
 // Copy both scripts to your CustomJS directory, then use:
 const { ConceptWrappers } = customJS;
+// Zero‑config, stable, section‑by‑section view
+ConceptWrappers.renderSmarterView(dv);
 
-// Default full view (zero-config)
-ConceptWrappers.renderSmartView(dv);
-
-// Optional overrides (kept minimal)
-// ConceptWrappers.renderSmartView(dv, { headerLevel: 3, debug: true });
-
-// Convenience variants
-// ConceptWrappers.renderLightSmartView(dv);  // concept analysis only
-// ConceptWrappers.renderGroupSmartView(dv);  // items + relationships
+// Optional overrides
+// ConceptWrappers.renderSmarterView(dv, {
+//   headerLevel: 2,
+//   sections: ['directConnections', 'relatedContent', 'relatedHubs'],
+//   concurrency: 2,          // 1 = sequential, >1 = interleaved builds
+//   observeQuietMs: 200,     // commit after DOM stays quiet this long
+//   observeMaxWaitMs: 3000,  // hard cap to commit
+//   collapseEmptySections: true,
+//   debug: false
+// });
 ```
 
 **Use as-is or copy and modify** to create your own custom wrapper classes. This demonstrates the architectural pattern while providing immediately useful functionality.
@@ -62,11 +65,29 @@ console.log(ConceptManager.helloWorld());
 
 ### 1. Wrapper Quick Start (recommended)
 
-Use the wrapper shown above. One line on any page does the right thing by default.
+Use the Smarter Wrapper. One line on any page does the right thing by default.
 
 ```dataviewjs
 const { ConceptWrappers } = customJS;
-ConceptWrappers.renderSmartView(dv);
+ConceptWrappers.renderSmarterView(dv);
+```
+
+### Supersedes earlier helpers
+
+The Smarter Wrapper replaces and renders obsolete the previous helper methods. Replace any usage of the old helpers with the new single call below.
+
+Before:
+
+```dataviewjs
+// ConceptWrappers.renderSmartView(dv)
+// ConceptWrappers.renderLightSmartView(dv)
+// ConceptWrappers.renderGroupSmartView(dv)
+```
+
+After:
+
+```dataviewjs
+ConceptWrappers.renderSmarterView(dv)
 ```
 
 ### 2. Direct Smart View (no wrapper)

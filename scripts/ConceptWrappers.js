@@ -1,13 +1,17 @@
 /*
  *  ███   Obsidian Concept Manager Wrappers (CustomJS)
- * █ ███  Version: 1.0.0
+ * █ ███  Version: 1.1.0
  * █ ███  Author: Benjamin Pequet
  *  ███   GitHub: https://github.com/pequet/obsidian-concept-manager/
  *
  * Purpose:
- *   Example wrapper class demonstrating how to create reusable, centrally managed
- *   functions that encapsulate specific ConceptManager configurations for different
- *   page types. Copy and modify this class to create your own custom wrappers.
+ *   High-stability, section-by-section orchestration around `ConceptManager.generateSmartView`.
+ *   Streams each section as it becomes ready, diff-detects changes, collapses empty
+ *   sections, and refreshes the UI only when content meaningfully changes.
+ *
+ *   Designed to remain stable even when Dataview auto-refreshes repeatedly; the
+ *   wrapper compares new output to the last cached DOM (timestamps ignored) and
+ *   updates only when necessary. This prevents flicker and redundant re-renders.
  *
  * Prerequisites:
  *   - ConceptManager.js must be loaded first
@@ -17,21 +21,27 @@
  * Usage:
  *   ```dataviewjs
  *   const { ConceptWrappers } = customJS;
- *   
- *   // Default full view (zero-config)
- *   ConceptWrappers.renderSmartView(dv);
- *   
- *   // Optional overrides (keep it simple)
- *   // ConceptWrappers.renderSmartView(dv, { headerLevel: 3, debug: true });
- *   
- *   // Convenience variants
- *   // ConceptWrappers.renderLightSmartView(dv);        // concept analysis only
- *   // ConceptWrappers.renderGroupSmartView(dv);        // items + relationships only
- *   // ConceptWrappers.renderLightSmartView(dv, { headerLevel: 3 });
- *   // ConceptWrappers.renderGroupSmartView(dv, { debug: true });
+ *
+ *   // Zero-config: renders Direct Connections, Related Content, Related Hubs
+ *   ConceptWrappers.renderSmarterView(dv);
+ *
+ *   // Optional overrides
+ *   // ConceptWrappers.renderSmarterView(dv, {
+ *   //     sections: ['directConnections', 'relatedContent', 'relatedHubs'],
+ *   //     headerLevel: 2,
+ *   //     concurrency: 2,              // 1 = sequential, >1 = interleaved builds
+ *   //     observeQuietMs: 200,         // commit after DOM stays quiet for this long
+ *   //     observeMaxWaitMs: 3000,      // hard cap to commit even if still mutating
+ *   //     collapseEmptySections: true, // hide sections with no meaningful content
+ *   //     debug: false
+ *   // });
  *   ```
  *
  * Changelog:
+ *   1.1.0 - 2025-08-10 - Overhaul: add `renderSmarterView` with caching, diff-aware
+ *                         updates, concurrency limiting, and empty-section collapsing.
+ *                         Remove legacy helpers `renderSmartView`, `renderLightSmartView`,
+ *                         and `renderGroupSmartView`.
  *   1.0.0 - 2025-08-04 - Initial release with basic wrapper examples.
  *
  * Support the Project:
@@ -182,24 +192,56 @@ class ConceptWrappers {
     }
 
     /**
-     * Orchestrated smart rendering: runs generateSmartView once per section,
-     * capturing output into ordered placeholders via the DV proxy. Does not modify
-     * ConceptManager.generateSmartView.
+     * renderSmarterView — Stable, section-by-section Smart View with caching and concurrency.
      *
-     * @param {Object} dv - Dataview API
-     * @param {Object} options
-     * @param {Array<string>} [options.sections=['relatedContent','directConnections','relatedHubs']] - Sections to run
-     * @param {number} [options.headerLevel=2] - Header level to pass through
-     * @param {number} [options.concurrency=1] - Max concurrent section builds (UI-friendly: 1–2)
-     * @param {boolean} [options.debug=false] - Wrapper-level debug logging
+     * Overview:
+     * - Runs `ConceptManager.generateSmartView` once per section using an off-screen staging
+     *   container. A MutationObserver waits until rendering settles (no DOM mutations for
+     *   `observeQuietMs`) or a hard cap (`observeMaxWaitMs`) is reached. The final DOM is then
+     *   committed into a visible slot for that section.
+     * - Uses a per-section cache (keyed by `currentFilePath::section::h<headerLevel>`) to compare
+     *   the newly produced HTML with the last committed HTML. Timestamp nodes are stripped from
+     *   both old and new before comparison, so changing clocks do not force re-renders.
+     * - If there is no meaningful change, the UI is left untouched. This keeps the view stable
+     *   under Dataview auto-refreshes.
+     * - Empty/non-meaningful results can be collapsed entirely when `collapseEmptySections` is true.
+     *
+     * Concurrency model:
+     * - `concurrency` controls how many section-build workers run at once. With `concurrency = 1`
+     *   sections build sequentially in their listed order. With `concurrency > 1`, they are
+     *   interleaved; whichever section settles first will display first. This is why a slower
+     *   section started earlier may still appear after a faster one, and vice versa — completion
+     *   order depends on actual render/settle time, not index order.
+     * - Recommended starting point: `concurrency: 2` for a balance of responsiveness and load.
+     *
+     * Commit timing:
+     * - Commit when DOM mutations have been quiet for `observeQuietMs` ms, or after
+     *   `observeMaxWaitMs` ms as a safety cap if the stream of mutations never stops.
+     *
+     * @param {Object} dv - Dataview API instance.
+     * @param {Object} options - Rendering options.
+     * @param {Array<string>} [options.sections=['directConnections','relatedContent','relatedHubs']] - Sections to run.
+     * @param {number} [options.headerLevel=2] - Header level passed through to ConceptManager.
+     * @param {number} [options.concurrency=4] - Number of parallel section workers (1 = sequential).
+     * @param {boolean} [options.debug=false] - Enable wrapper-level debug logs.
+     * @param {number} [options.observeQuietMs=200] - Required quiet period (ms) before commit.
+     * @param {number} [options.observeMaxWaitMs=3000] - Hard cap (ms) to force commit.
+     * @param {boolean} [options.collapseEmptySections=true] - Hide sections with no meaningful content.
+     * @param {boolean} [options.showTimestamp=true] - Pass-through to ConceptManager.
+     * @param {boolean} [options.showTimeBuild=true] - Pass-through to ConceptManager.
      */
-    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 2, debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true } = {}) {
+    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 1, debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = true } = {}) {
         const { ConceptManager } = customJS;
 
         // Root container and ordered slots
         const root = dv.el('div', '');
         const sourcePath = dv.current()?.file?.path || '/';
         const makeKey = (section) => `${sourcePath}::${section}::h${headerLevel}`;
+        const SECTION_LABELS = {
+            directConnections: 'Key Connections',
+            relatedContent: 'Related Content',
+            relatedHubs: 'Related Hubs'
+        };
         if (debug && console && console.log) {
             console.log('[SmarterView] init', {
                 sections,
@@ -229,13 +271,14 @@ class ConceptWrappers {
                     slot.innerHTML = cached;
                 }
             } else if (debug) {
-                slot.textContent = `Loading ${section}…`;
+                const label = SECTION_LABELS[section] || section;
+                slot.textContent = `Loading ${label}…`;
             }
             root.appendChild(slot);
             return slot;
         });
 
-        // Create tasks
+        // Create per-section tasks (each builds off-screen and commits when settled)
         const tasks = sections.map((section, index) => () => new Promise((resolve) => {
             // Yield to let placeholders paint
             setTimeout(() => {
@@ -260,7 +303,9 @@ class ConceptWrappers {
                         headerLevel,
                         enabledSteps: [section],
                     // Force ConceptManager debug off; wrapper handles its own logging
-                    debug: false
+                    debug: false,
+                        showTimestamp,
+                        showTimeBuild
                     });
                 if (debug && console && console.log) console.log('[SmarterView] CM invoked', { section, index });
 
@@ -364,14 +409,15 @@ class ConceptWrappers {
                 } catch (err) {
                     if (console && console.error) console.error('[SmarterView] error', { section, index, err });
                     // Simple error display inside the slot
-                    slots[index].textContent = `Error rendering ${section}: ${err?.message || err}`;
+                    const label = SECTION_LABELS[section] || section;
+                    slots[index].textContent = `Error rendering ${label}: ${err?.message || err}`;
                     if (staging && staging.parentNode) staging.parentNode.removeChild(staging);
                     resolve();
                 }
             }, 0);
         }));
 
-        // Run with a simple concurrency limiter
+        // Run with a simple concurrency limiter (queue + N workers)
         const runWithConcurrency = (fns, limit) => {
             const queue = [...fns];
             const workers = new Array(Math.max(1, Number(limit) || 1)).fill(0).map(async () => {
@@ -384,57 +430,14 @@ class ConceptWrappers {
             return Promise.all(workers);
         };
 
-        // Fire-and-forget; DVJS blocks are usually fine without awaiting here
+        // Fire-and-forget; DVJS blocks are usually fine without awaiting
         runWithConcurrency(tasks, concurrency);
     }
 
-
-
-
-
-
-
-    
-    /**
-     * Single-entry, zero-config wrapper for Smart View.
-     * Adapts automatically to the current page.
-     * @param {Object} dv - Dataview API
-     */
-    renderSmartView(dv, { headerLevel = 2, debug = false } = {}) {
-        const { ConceptManager } = customJS;
-        // Opinionated presets (centralized) with simple overrides
-        ConceptManager.generateSmartView({
-            dv,
-            headerLevel,
-            enabledSteps: ['directConnections', 'relatedContent', 'relatedHubs'],
-            debug
-        });
-    }
-
-    /**
-     * Convenience: Light view (concept analysis only)
-     */
-    renderLightSmartView(dv, { headerLevel = 2, debug = false } = {}) {
-        const { ConceptManager } = customJS;
-        ConceptManager.generateSmartView({
-            dv,
-            headerLevel,
-            enabledSteps: ['relatedContent'],
-            debug
-        });
-    }
-
-    /**
-     * Convenience: Group-focused (items + relationships)
-     */
-    renderGroupSmartView(dv, { headerLevel = 2, debug = false } = {}) {
-        const { ConceptManager } = customJS;
-        ConceptManager.generateSmartView({
-            dv,
-            headerLevel,
-            enabledSteps: ['directConnections', 'relatedHubs'],
-            debug
-        });
-    }
+    // Deprecated helpers removed in v1.1.0:
+    // - renderSmartView
+    // - renderLightSmartView
+    // - renderGroupSmartView
 
 }
+
