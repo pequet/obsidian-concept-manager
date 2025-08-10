@@ -229,8 +229,8 @@ class ConceptManager {
      _renderTimestamp({ dv, label = 'Rendered at' } = {}) {
          if (!dv) return;
          const ts = this._formatTimestamp(new Date());
-         // Use HTML to get a subtle, grey style
-         dv.paragraph(`<div style="color:#888; font-size:0.9em; margin-top:6px;">${label}: ${ts}</div>`);
+         // Use HTML to get a subtle, grey style; tag with data attributes for diff-ignoring
+         dv.paragraph(`<div data-ocm-ts="1" class="ocm-ts" style="color:#888; font-size:0.9em; margin-top:6px;">${label}: ${ts}</div>`);
      }
 
     enableConfigMemoization({ enabled = true, ttlMs = 0 } = {}) {

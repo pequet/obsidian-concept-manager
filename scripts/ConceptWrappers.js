@@ -287,13 +287,25 @@ class ConceptWrappers {
                             const hadCache = this._smarterCache.has(key);
                             const oldHtml = hadCache ? this._smarterCache.get(key) : '';
 
+                            // Normalize HTML by stripping timestamp nodes so diffs ignore them
+                            const stripTimestamps = (html) => {
+                                try {
+                                    const tmp = document.createElement('div');
+                                    tmp.innerHTML = html || '';
+                                    tmp.querySelectorAll('[data-ocm-ts], .ocm-ts').forEach(n => n.parentNode && n.parentNode.removeChild(n));
+                                    return tmp.innerHTML;
+                                } catch (_) {
+                                    return html || '';
+                                }
+                            };
+
                             // Determine if result has meaningful visible content
                             const meaningfulNode = staging.querySelector('table tr, td, th, ul li, ol li, h1, h2, h3, h4, h5, h6, a[href], img, pre, code, blockquote');
                             const hasMeaningfulText = ((staging.textContent || '').trim().length > 0);
                             const isMeaningful = Boolean(meaningfulNode || hasMeaningfulText);
 
                             const newHtml = (collapseEmptySections && !isMeaningful) ? '' : rawHtml;
-                            const changed = (!hadCache) || (newHtml !== oldHtml);
+                            const changed = (!hadCache) || (stripTimestamps(newHtml) !== stripTimestamps(oldHtml));
 
                             if (debug && console && console.log) {
                                 const tableRows = staging.querySelectorAll('table tr').length;
