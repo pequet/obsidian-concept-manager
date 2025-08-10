@@ -193,7 +193,7 @@ class ConceptWrappers {
      * @param {number} [options.concurrency=1] - Max concurrent section builds (UI-friendly: 1–2)
      * @param {boolean} [options.debug=false] - Wrapper-level debug logging
      */
-    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 1, debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true } = {}) {
+    renderSmarterView(dv, { sections = ['directConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 2, debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true } = {}) {
         const { ConceptManager } = customJS;
 
         // Root container and ordered slots
@@ -210,7 +210,7 @@ class ConceptWrappers {
                 sourcePath
             });
         }
-        const slots = sections.map((section) => {
+            const slots = sections.map((section) => {
             const slot = document.createElement('div');
             slot.setAttribute('data-section', section);
             slot.style.minHeight = '1em';
@@ -225,6 +225,7 @@ class ConceptWrappers {
                     slot.style.marginBottom = '0';
                     slot.innerHTML = '';
                 } else {
+                    // Rehydrate cached HTML; keep as-is (contains timestamps)
                     slot.innerHTML = cached;
                 }
             } else if (debug) {
@@ -327,6 +328,13 @@ class ConceptWrappers {
                                     const frag = document.createDocumentFragment();
                                     while (staging.firstChild) frag.appendChild(staging.firstChild);
                                     slots[index].replaceChildren(frag);
+                                    // Update timestamp label to "Updated at" when replacing existing content
+                                    try {
+                                        if (hadCache) {
+                                            const labels = slots[index].querySelectorAll('[data-ocm-ts] .ocm-ts-label');
+                                            labels.forEach(node => { node.textContent = 'Updated at'; });
+                                        }
+                                    } catch (_) { /* ignore */ }
                                     slots[index].style.display = '';
                                     slots[index].style.minHeight = '1em';
                                     slots[index].style.marginBottom = '0.5rem';
