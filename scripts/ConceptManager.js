@@ -2578,6 +2578,11 @@ class ConceptManager {
         const currentPage = dv.current();
         const currentSubject = subject || currentPage.subject;
 
+        // Fetch config for gating and build sets for early filtering
+        const __cfgForClassifications = this.getConfigForSubject({ dv, subject: currentSubject, debug: false });
+        const validSubjectsSetForClass = new Set(__cfgForClassifications.validSubjects || []);
+        const validDomainsSetForClass = new Set(__cfgForClassifications.validDomains || []);
+
         // Insert a single wrapper header "Categories" before any per-type sections
         const presentTypes = relationTypes.filter(type => {
             const currentValues = currentPage["group-" + type];
@@ -2655,13 +2660,24 @@ class ConceptManager {
                 const valueString = String(value).trim();
                 const valueLower = valueString.toLowerCase();
                     const matchingPages = dv.pages()
-                    .where(p => (
-                        (p.domain === "concepts" || p.domain === "patterns") &&
-                        (
-                            (p.file && p.file.name && String(p.file.name).toLowerCase() === valueLower) ||
-                            (Array.isArray(p.aliases) && p.aliases.some(a => String(a).toLowerCase() === valueLower))
-                        )
-                    ));
+                    .where(p => {
+                        // Exclude archives by path (case-insensitive)
+                        const pathLower = String(p.file?.path || '').toLowerCase();
+                        if (
+                            pathLower.includes('/archives/') ||
+                            pathLower.includes('/models/4. archives/')
+                        ) return false;
+
+                        // Early subject/domain gating from config
+                        if (validSubjectsSetForClass.size > 0 && !validSubjectsSetForClass.has(p.subject)) return false;
+                        if (validDomainsSetForClass.size > 0 && !validDomainsSetForClass.has(p.domain)) return false;
+
+                        // Name or alias match (case-insensitive)
+                        const fileNameLower = String(p.file?.name || '').toLowerCase();
+                        if (fileNameLower === valueLower) return true;
+                        if (Array.isArray(p.aliases) && p.aliases.some(a => String(a).toLowerCase() === valueLower)) return true;
+                        return false;
+                    });
                 return { value: valueString, matchingPages };
                 });
 
@@ -2828,6 +2844,13 @@ class ConceptManager {
             const validSubjectsSet = new Set(config.validSubjects || []);
             const validDomainsSet = new Set(config.validDomains || []);
             const allMatchingPages = dv.pages().where(p => {
+                // Exclude archives by path (case-insensitive)
+                const pathLower = String(p.file?.path || '').toLowerCase();
+                if (
+                    pathLower.includes('/archives/') ||
+                    pathLower.includes('/models/4. archives/')
+                ) return false;
+
                 if (!p[groupFieldName]) return false;
                 // Early subject/domain filters
                 if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
@@ -2864,6 +2887,12 @@ class ConceptManager {
             const validDomainsSet = new Set(config.validDomains || []);
 
             const allMatchingPages = dv.pages().where(p => {
+                // Exclude archives by path (case-insensitive)
+                const pathLower = String(p.file?.path || '').toLowerCase();
+                if (
+                    pathLower.includes('/archives/') ||
+                    pathLower.includes('/models/4. archives/')
+                ) return false;
                 if (!p[groupFieldName]) return false;
                 // Early subject/domain filters
                 if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
