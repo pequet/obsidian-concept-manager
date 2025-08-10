@@ -231,7 +231,7 @@ class ConceptWrappers {
      * @param {boolean} [options.showTimestamp=true] - Pass-through to ConceptManager.
      * @param {boolean} [options.showTimeBuild=true] - Pass-through to ConceptManager.
      */
-     renderSmarterView(dv, { sections = ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 2, prioritySections = [], debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = false } = {}) {
+     renderSmarterView(dv, { sections = ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 1, prioritySections = [], debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = false } = {}) {
         const { ConceptManager } = customJS;
 
         // Root container and ordered slots

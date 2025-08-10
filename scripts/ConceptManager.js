@@ -67,11 +67,18 @@
   *         getPerfSummary(), printPerfSummaryToDv({ dv })
   *     • Subject/Domain early filtering inside dv.pages().where(...) to minimize candidate sets
   *       - Applied in: getRelatedFilesByDistance, generateViewTable (hub + regular),
-  *         generateGroupItemsList, renderKeyConnectionsForConcept
+ *         generateGroupItemsList, renderKeyConnectionsForConcept, getRelatedConcepts, renderTopRelatedContent
+ *     • Never hardcode valid domains or subjects. Always use config.valid_subjects / config.valid_domains.
+ *     • Exclude archive paths early in every query (e.g., "/archives/" or "/models/4. archives/").
+ *     • Cache & reuse: build small in-memory indexes or materialized candidate arrays once per render
+ *       and use them inside loops (low-effort, high-impact) to avoid repeated dv.pages() calls.
   *     • Config memoization per subject for getConfigForSubject
   *       - Methods: enableConfigMemoization({ enabled, ttlMs }), invalidateConfigCache(subject?)
   *     • Sets usage policy: use Sets only for subject/domain gating (built once per query call);
   *       avoid per-row Sets (value matches still use arrays)
+ *     • Concurrency note: higher concurrency does not always improve wall time. In practice,
+ *       DV evaluation and DOM painting can interleave; a concurrency of 1 often yields faster
+ *       visible settle times than 2+.
   * 
   *   - How to use (example):
   *   ```dataviewjs
@@ -128,6 +135,12 @@ class ConceptManager {
         // Classifications: index cache (subject/filters-scoped)
         // key: `${subject}||S:${sortedValidSubjects}||D:${sortedValidDomains}` -> { nameIndex, aliasIndex, eligibleCount, createdAtMs }
         this._classLookupIndexCache = new Map();
+
+        // Hub index per subject for fast lookups: subject -> Map(domainCategory -> hubPage)
+        this._hubIndexCache = new Map();
+
+        // Value index per subject/context for fast name/alias lookups
+        this._valueIndexCache = new Map();
     }
 
     // --- Performance Logging Controls ---
@@ -815,6 +828,10 @@ class ConceptManager {
                         const searchSubjects = Array.isArray(searchFilters.subject) ? searchFilters.subject : [searchFilters.subject];
                         if (!searchSubjects.includes(p.subject)) return false;
                     }
+                    // Apply domain filter if configured
+                    if (config.validDomains && config.validDomains.length > 0) {
+                        if (!config.validDomains.includes(p.domain)) return false;
+                    }
                     // Apply domain filter if it's in searchFilters (handle arrays properly)
                     if (searchFilters.domain) {
                         const searchDomains = Array.isArray(searchFilters.domain) ? searchFilters.domain : [searchFilters.domain];
@@ -919,6 +936,10 @@ class ConceptManager {
                     .where(p => {
                         // Filter by valid subjects
                         if (!config.validSubjects.includes(p.subject)) return false;
+                        // Filter by valid domains when configured
+                        if (config.validDomains && config.validDomains.length > 0) {
+                            if (!config.validDomains.includes(p.domain)) return false;
+                        }
                         
                         // Exclude current page
                         if (p.file.path === current.file.path) return false;
@@ -1015,6 +1036,9 @@ class ConceptManager {
                             .where(p => {
                                 // Subject/domain safety filters
                                 if (!config.validSubjects.includes(p.subject)) return false;
+                                if (config.validDomains && config.validDomains.length > 0) {
+                                    if (!config.validDomains.includes(p.domain)) return false;
+                                }
                                 if (p.file.path === current.file.path) return false;
 
                                 // Must have domain-category including the expected category
@@ -1548,6 +1572,62 @@ class ConceptManager {
     }
 
     /**
+     * Builds and memoizes a hub index for a given subject.
+     * Index maps each domain-category to the first matching Hub page and its names.
+     * Queries are gated by valid subjects, valid domains, and archive path exclusion.
+     *
+     * @param {Object} params
+     * @param {Object} params.dv - Dataview API
+     * @param {string} params.subject - Subject namespace
+     * @param {boolean} [params.debug=false]
+     * @returns {Map<string, { hub:any, fileName:string, canonicalName:string|null, displayName:string }>} hub index
+     */
+    _getHubIndexForSubject({ dv, subject, debug = false }) {
+        if (!this._hubIndexCache) this._hubIndexCache = new Map();
+        const existing = this._hubIndexCache.get(subject);
+        if (existing) return existing;
+
+        const __token = this._perfStart('hubIndex.build');
+        const config = this.getConfigForSubject({ dv, subject, debug: false });
+        const validSubjectsSet = new Set(config.validSubjects || []);
+        const validDomainsSet = new Set(config.validDomains || []);
+
+        const hubsAll = dv.pages()
+            .where(p => {
+                // hub type only
+                if (p.type !== 'hub') return false;
+                // subject gating
+                if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+                // domain gating
+                if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
+                // has domain-category
+                if (!p['domain-category']) return false;
+                // exclude archives paths
+                const pathLower = String(p.file?.path || '').toLowerCase();
+                if (pathLower.includes('/archives/') || pathLower.includes('/models/4. archives/')) return false;
+                return true;
+            })
+            .array();
+
+        const index = new Map();
+        for (const hub of hubsAll) {
+            const cats = this.normalizeValues(hub['domain-category']);
+            const canonical = hub['canonical-name'] ? String(hub['canonical-name']) : null;
+            const fileName = String(hub.file?.name || '');
+            const display = canonical && canonical.trim().length > 0 ? canonical : fileName;
+            for (const cat of cats) {
+                if (!index.has(cat)) {
+                    index.set(cat, { hub, fileName, canonicalName: canonical, displayName: display });
+                }
+            }
+        }
+
+        this._perfEnd(__token, { hubs: hubsAll.length, categories: index.size });
+        this._hubIndexCache.set(subject, index);
+        return index;
+    }
+
+    /**
      * ...
      */
     getRelationLabel({ dv, domainCategory, direction, subject, debug = false }) {
@@ -1583,25 +1663,15 @@ class ConceptManager {
             dv.paragraph(`Search criteria: type="hub", domain-category="${domainCategory}", subject="${subject}"`);
         }
         
-        // Look for Hub pages with matching domain-category (string or array) and subject
-        const hubs = dv.pages()
-            .where(p => {
-                if (p.type !== "hub") return false;
-                if (p.subject !== subject) return false;
-                if (!p["domain-category"]) return false;
-                const hubCats = this.normalizeValues(p["domain-category"]);
-                return hubCats.includes(domainCategory);
-            });
-        
+        // Use hub index (built once per subject)
+        const hubIndex = this._getHubIndexForSubject({ dv, subject, debug: false });
+        const hub = hubIndex.get(domainCategory)?.hub || null;
+
         if (debug) {
-            dv.paragraph(`Found ${hubs.length} matching Hub(s)`);
-            if (hubs.length > 1) {
-                dv.paragraph(`⚠️ Multiple Hubs found - using first: ${hubs.map(h => h.file.name).join(', ')}`);
-            }
+            dv.paragraph(`Found ${hub ? 1 : 0} matching Hub(s)`);
         }
-        
-        if (hubs.length > 0) {
-            const hub = hubs[0]; // Take first if multiple
+
+        if (hub) {
             
             // Check for explicit canonical-name field first
             if (hub["canonical-name"]) {
@@ -1662,8 +1732,10 @@ class ConceptManager {
             dv.paragraph(`**📝 Getting display name for domain-category: "${domainCategory}"**`);
         }
         
-        // Try to get canonical name from hub
-        const canonicalName = this.getCanonicalNameForCategory({ dv, domainCategory, subject, debug });
+        // Try to get canonical name from hub via hub index (cached)
+        const hubIndex = this._getHubIndexForSubject({ dv, subject, debug: false });
+        const hubEntry = hubIndex.get(domainCategory) || null;
+        const canonicalName = hubEntry ? (hubEntry.canonicalName || hubEntry.fileName) : null;
         
         if (canonicalName) {
             if (debug) {
@@ -1672,16 +1744,13 @@ class ConceptManager {
             this._displayNameCache.set(cacheKey, canonicalName);
             return canonicalName;
         } else {
-            // Fall back to kebab-case
+            // Fall back to raw domainCategory (no transformation)
             if (debug) {
-                dv.paragraph(`⚙️ No Hub found, using fallback: "${domainCategory}"`);
-                dv.paragraph(`💡 Tip: Create a Hub page to customize this display name. Optionally, add a "canonical-name" field to the Hub page to override the page name.`);
+                dv.paragraph(`⚙️ No Hub found, using raw key: "${domainCategory}"`);
             }
-            const titleCase = String(domainCategory)
-                .replace(/[-_]+/g, ' ')
-                .replace(/\b\w/g, c => c.toUpperCase());
-            this._displayNameCache.set(cacheKey, titleCase);
-            return titleCase;
+            const display = String(domainCategory);
+            this._displayNameCache.set(cacheKey, display);
+            return display;
         }
     }
 
@@ -2607,21 +2676,27 @@ class ConceptManager {
         const validSubjectsSetForClass = new Set(__cfgForClassifications.validSubjects || []);
         const validDomainsSetForClass = new Set(__cfgForClassifications.validDomains || []);
 
-        // Prefetch once with small in-session cache
-        const sortedSubjectsKey = Array.from(validSubjectsSetForClass).sort().join(',');
-        const sortedDomainsKey = Array.from(validDomainsSetForClass).sort().join(',');
-        const indexCacheKey = `${currentSubject}||S:${sortedSubjectsKey}||D:${sortedDomainsKey}`;
+        // Compute all requested values across all relation types (once)
+        const requestedValuesLower = new Set();
+        (relationTypes || []).forEach(type => {
+            const currentValues = currentPage["group-" + type] || [];
+            const normalizedValues = this.normalizeValues(currentValues)
+                .map(v => String(v).trim())
+                .filter(v => v.length > 0);
+            normalizedValues.forEach(v => requestedValuesLower.add(v.toLowerCase()));
+        });
 
-        let nameIndex;
-        let aliasIndex;
-
-        const cachedIndex = this._classLookupIndexCache && this._classLookupIndexCache.get(indexCacheKey);
-        if (cachedIndex) {
-            nameIndex = cachedIndex.nameIndex;
-            aliasIndex = cachedIndex.aliasIndex;
+        // Single scan (cached per subject + filters): find pages whose name/aliases match requested values
+        const valIndexKey = `${currentSubject}||S:${Array.from(validSubjectsSetForClass).sort().join(',')}||D:${Array.from(validDomainsSetForClass).sort().join(',')}`;
+        let matchedByName;
+        let matchedByAlias;
+        const cachedValIndex = this._valueIndexCache.get(valIndexKey);
+        if (cachedValIndex) {
+            matchedByName = cachedValIndex.byName;
+            matchedByAlias = cachedValIndex.byAlias;
         } else {
-            const __eligibleClassToken = this._perfStart('renderConceptClassifications.eligible');
-            const eligiblePagesForNames = dv.pages()
+            const __valuesScanToken = this._perfStart('renderConceptClassifications.valueScan');
+            const matchedPages = dv.pages()
                 .where(p => {
                     // Exclude archives by path (case-insensitive)
                     const pathLower = String(p.file?.path || '').toLowerCase();
@@ -2629,81 +2704,29 @@ class ConceptManager {
                         pathLower.includes('/archives/') ||
                         pathLower.includes('/models/4. archives/')
                     ) return false;
-
-                    // Early subject/domain gating
+                    // subject/domain gating
                     if (validSubjectsSetForClass.size > 0 && !validSubjectsSetForClass.has(p.subject)) return false;
                     if (validDomainsSetForClass.size > 0 && !validDomainsSetForClass.has(p.domain)) return false;
+                    // We’ll filter to requested values while building maps
                     return true;
                 })
                 .array();
-            this._perfEnd(__eligibleClassToken, { eligible: eligiblePagesForNames.length });
 
-            // Build quick lookup indexes once
-            nameIndex = new Map(); // lower(name) -> pages[]
-            aliasIndex = new Map(); // lower(alias) -> pages[]
-            for (const page of eligiblePagesForNames) {
-                const nameLower = String(page.file?.name || '').toLowerCase();
-                if (nameLower.length > 0) {
-                    const list = nameIndex.get(nameLower) || [];
-                    list.push(page);
-                    nameIndex.set(nameLower, list);
-                }
-                if (Array.isArray(page.aliases)) {
-                    for (const alias of page.aliases) {
-                        const aliasLower = String(alias).toLowerCase();
-                        if (aliasLower.length === 0) continue;
-                        const list = aliasIndex.get(aliasLower) || [];
-                        list.push(page);
-                        aliasIndex.set(aliasLower, list);
+            matchedByName = new Map();
+            matchedByAlias = new Map();
+            for (const p of matchedPages) {
+                const nl = String(p.file?.name || '').toLowerCase();
+                if (!matchedByName.has(nl)) matchedByName.set(nl, p);
+                if (Array.isArray(p.aliases)) {
+                    for (const a of p.aliases) {
+                        const al = String(a).toLowerCase();
+                        if (!matchedByAlias.has(al)) matchedByAlias.set(al, p);
                     }
                 }
             }
-
-            // Save to cache
-            if (!this._classLookupIndexCache) this._classLookupIndexCache = new Map();
-            this._classLookupIndexCache.set(indexCacheKey, {
-                nameIndex,
-                aliasIndex,
-                createdAtMs: this._getNowMs()
-            });
+            this._perfEnd(__valuesScanToken, { scanned: matchedPages.length, byName: matchedByName.size, byAlias: matchedByAlias.size });
+            this._valueIndexCache.set(valIndexKey, { byName: matchedByName, byAlias: matchedByAlias });
         }
-
-        // Alias index: build lazily only if needed (when a value misses nameIndex)
-        let aliasIndexLocal = aliasIndex;
-        let aliasIndexBuilt = !!aliasIndexLocal;
-        const buildAliasIndexIfNeeded = (need) => {
-            if (aliasIndexBuilt || !need) return;
-            const __eligibleAliasToken = this._perfStart('renderConceptClassifications.aliasIndex');
-            const eligiblePagesForAlias = dv.pages()
-                .where(p => {
-                    const pathLower = String(p.file?.path || '').toLowerCase();
-                    if (
-                        pathLower.includes('/archives/') ||
-                        pathLower.includes('/models/4. archives/')
-                    ) return false;
-                    if (validSubjectsSetForClass.size > 0 && !validSubjectsSetForClass.has(p.subject)) return false;
-                    if (validDomainsSetForClass.size > 0 && !validDomainsSetForClass.has(p.domain)) return false;
-                    return Array.isArray(p.aliases) && p.aliases.length > 0;
-                })
-                .array();
-            aliasIndexLocal = new Map();
-            for (const page of eligiblePagesForAlias) {
-                for (const alias of page.aliases) {
-                    const aliasLower = String(alias).toLowerCase();
-                    if (aliasLower.length === 0) continue;
-                    // Only store first match per alias for speed
-                    if (!aliasIndexLocal.has(aliasLower)) {
-                        aliasIndexLocal.set(aliasLower, page);
-                    }
-                }
-            }
-            this._perfEnd(__eligibleAliasToken, { aliasedPages: eligiblePagesForAlias.length, aliasesIndexed: aliasIndexLocal.size });
-            aliasIndexBuilt = true;
-            // Update cache entry with alias index for reuse
-            const existing = this._classLookupIndexCache.get(indexCacheKey) || { nameIndex };
-            existing.aliasIndex = aliasIndexLocal;
-            this._classLookupIndexCache.set(indexCacheKey, existing);
-        };
 
         // Insert a single wrapper header "Categories" before any per-type sections
         const presentTypes = relationTypes.filter(type => {
@@ -2782,19 +2805,14 @@ class ConceptManager {
                     const valueString = String(value).trim();
                     const valueLower = valueString.toLowerCase();
 
-                    // Resolve matches with minimal work:
-                    // 1) Try nameIndex (fast). If none, lazily build aliasIndex and try single best alias match.
+                    // Resolve from single-scan maps (prefer name match over alias)
                     const matches = [];
-                    const nameMatches = nameIndex.get(valueLower);
-                    if (nameMatches && nameMatches.length > 0) {
-                        // Take first only for bullet and table purposes
-                        matches.push(nameMatches[0]);
+                    const byName = matchedByName.get(valueLower);
+                    if (byName) {
+                        matches.push(byName);
                     } else {
-                        buildAliasIndexIfNeeded(true);
-                        const aliasMatchPage = aliasIndexLocal.get(valueLower);
-                        if (aliasMatchPage) {
-                            matches.push(aliasMatchPage);
-                        }
+                        const byAlias = matchedByAlias.get(valueLower);
+                        if (byAlias) matches.push(byAlias);
                     }
 
                     return { value: valueString, matchingPages: matches };
@@ -3089,6 +3107,9 @@ class ConceptManager {
         // Default validSubjects to current subject if not provided
         const subjectsToUse = (validSubjects && validSubjects.length > 0) ? validSubjects : [currentSubject];
 
+        // Note: All queries inside getRelatedConcepts are gated by valid subjects/domains and path
+        // We also avoid repeated queries by caching config and building indexes where helpful.
+
             if (debug) {
                 dv.paragraph(`**Step 4: Finding related concepts**`);
             dv.paragraph(`Using getRelatedConcepts with relationTypes: [${(relationTypes || []).join(', ')}]`);
@@ -3122,11 +3143,7 @@ class ConceptManager {
                 dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
             }
             
-            const related = this.getRelatedConcepts({ 
-                dv, 
-                matchCriteria,
-            debug
-            });
+            const related = this.getRelatedConcepts({ dv, matchCriteria, debug });
 
             const filteredResults = related
                 .filter(r => r.concept.file.path !== currentPage.file.path)
