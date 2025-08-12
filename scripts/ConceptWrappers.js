@@ -22,18 +22,24 @@
  *   ```dataviewjs
  *   const { ConceptWrappers } = customJS;
  *
- *   // Zero-config: renders Classifications, Key Connections, Related Content, Related Hubs
+ *   // Zero-config: renders Cache Prep, LEGACY Classifications, CACHED Classifications, LEGACY Key Connections, CACHED Key Connections, LEGACY Related Content, CACHED Related Content, LEGACY Related Hubs, CACHED Related Hubs
  *   ConceptWrappers.renderSmarterView(dv);
  *
  *   // Optional overrides
  *   // ConceptWrappers.renderSmarterView(dv, {
- *   //     sections: ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'],
+ *   //     sections: ['cachePrep', 'contentClassifications_legacy', 'contentClassifications', 'keyConnections_legacy', 'keyConnections', 'relatedContent_legacy', 'relatedContent', 'relatedHubs_legacy', 'relatedHubs'],
  *   //     headerLevel: 2,
  *   //     concurrency: 2,              // 1 = sequential, >1 = interleaved builds
  *   //     observeQuietMs: 200,         // commit after DOM stays quiet for this long
  *   //     observeMaxWaitMs: 3000,      // hard cap to commit even if still mutating
  *   //     collapseEmptySections: true, // hide sections with no meaningful content
  *   //     debug: false
+ *   // });
+ *   
+ *   // Cache Prep + A/B Testing enabled by default - cache preparation section builds cache first, then legacy and cached versions of all sections run with optimal performance!
+ *   // For sequential comparison (not parallel):
+ *   // ConceptWrappers.renderSmarterView(dv, {
+ *   //     concurrency: 1               // sequential for direct comparison
  *   // });
  *   ```
  *
@@ -220,7 +226,7 @@ class ConceptWrappers {
      *
      * @param {Object} dv - Dataview API instance.
      * @param {Object} options - Rendering options.
-     * @param {Array<string>} [options.sections=['directConnections','relatedContent','relatedHubs']] - Sections to run.
+     * @param {Array<string>} [options.sections=['cachePrep','contentClassifications_legacy','contentClassifications','keyConnections_legacy','keyConnections','relatedContent_legacy','relatedContent','relatedHubs_legacy','relatedHubs']] - Sections to run. Cache prep + A/B testing enabled by default.
      * @param {number} [options.headerLevel=2] - Header level passed through to ConceptManager.
      * @param {number} [options.concurrency=2] - Number of parallel section workers (1 = sequential).
      * @param {Array<string>} [options.prioritySections=[]] - Build scheduling priority (visual order unchanged).
@@ -231,7 +237,18 @@ class ConceptWrappers {
      * @param {boolean} [options.showTimestamp=true] - Pass-through to ConceptManager.
      * @param {boolean} [options.showTimeBuild=true] - Pass-through to ConceptManager.
      */
-     renderSmarterView(dv, { sections = ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'], headerLevel = 2, concurrency = 1, prioritySections = [], debug = false, observeQuietMs = 200, observeMaxWaitMs = 3000, collapseEmptySections = true, showTimestamp = true, showTimeBuild = false } = {}) {
+     renderSmarterView(dv, { 
+        sections = ['cachePrep', 'relatedContent_legacy', 'relatedContent'], // 'contentClassifications_legacy', 'contentClassifications', 'keyConnections_legacy', 'keyConnections', ... , 'relatedHubs_legacy', 'relatedHubs'
+        headerLevel = 2, 
+        concurrency = 1, 
+        prioritySections = [], 
+        debug = false, 
+        observeQuietMs = 200, 
+        observeMaxWaitMs = 3000, 
+        collapseEmptySections = true, 
+        showTimestamp = true, 
+        showTimeBuild = false 
+    } = {}) {
         const { ConceptManager } = customJS;
 
         // Root container and ordered slots
@@ -239,9 +256,14 @@ class ConceptWrappers {
         const sourcePath = dv.current()?.file?.path || '/';
         const makeKey = (section) => `${sourcePath}::${section}::h${headerLevel}`;
         const SECTION_LABELS = {
+            cachePrep: 'Cache Preparation',
+            contentClassifications_legacy: 'LEGACY Classifications',
             contentClassifications: 'Classifications',
+            keyConnections_legacy: 'LEGACY Key Connections',
             keyConnections: 'Key Connections',
+            relatedContent_legacy: 'LEGACY Related Content',
             relatedContent: 'Related Content',
+            relatedHubs_legacy: 'LEGACY Related Hubs',
             relatedHubs: 'Related Hubs'
         };
         if (debug && console && console.log) {

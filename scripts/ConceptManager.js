@@ -1824,10 +1824,13 @@ class ConceptManager {
      * @param {number} [params.headerLevel=2] - The level for the header (1-6)
      * @param {boolean} [params.debug=false] - Show detailed debug output
      */
-    generateViewTable({ dv, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
+    generateViewTableLegacy({ dv, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
         try {
             const __buildStart = this._getNowMs();
             const currentPage = dv.current();
+
+            console.log(`[LEGACY] 🏢 Starting LEGACY Related Hubs for subject: ${currentPage.subject}`);
+            console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
             
             // Get config validation for the current page's subject
             const config = this.getConfigForSubject({ 
@@ -2004,10 +2007,8 @@ class ConceptManager {
                     });
 
                     dv.table(columns, rows);
-                    if (showTimestamp) this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
                 } else {
                     dv.paragraph("*No related Groups (Concepts/Core Patterns) found with matching domain categories. Please ensure pages have the appropriate frontmatter.*");
-                    if (showTimestamp) this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
                 }
 
             } else {
@@ -2219,7 +2220,6 @@ class ConceptManager {
                                 });
 
                                 dv.table(columns, rows);
-                                if (showTimestamp) this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
                         } else {
                             // Fallback to original behavior if no domain categories or no groups have values for the key
                             const pagesArray = Array.from(relatedGroups);
@@ -2254,13 +2254,298 @@ class ConceptManager {
                                 });
 
                                 dv.table(columns, rows);
-                                if (showTimestamp) this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
                         }
                     } 
                 } else {
                     // Silently no-op when no hubs are found for this domain-category
                     return;
                 }
+            }
+
+            const __methodEnd = this._getNowMs();
+            const buildTime = Math.round(__methodEnd - __buildStart);
+            console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+            console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+            console.log(`[LEGACY] ✅ Legacy Related Hubs completed in ${buildTime}ms`);
+
+            if (showTimestamp) {
+                this._renderTimestamp({ dv, label: 'LEGACY Rendered at', durationMs: showTimeBuild ? buildTime : null });
+            }
+        } catch (error) {
+            dv.header(headerLevel, "⚠️ Error Loading Content");
+            dv.paragraph("**Something went wrong while trying to display content.**");
+            dv.paragraph(`Error: ${error.message}`);
+            
+            if (debug) {
+                dv.paragraph("**Debug Info:**");
+                dv.paragraph(`Current page available fields: ${Object.keys(dv.current()).filter(k => k !== 'file' && typeof dv.current()[k] !== 'function').join(', ')}`);
+            }
+            
+            // Check for specific error conditions and provide helpful messages
+            if (error.message.includes("domain-category")) {
+                dv.paragraph("**Possible solutions:**");
+                dv.list([
+                    "Ensure this file has proper frontmatter with 'domain-category' defined",
+                    "**Try restarting Obsidian** - changes to frontmatter often require a restart to be recognized",
+                    "Check that your pages exist and have the correct metadata"
+                ]);
+            } else if (error.message.includes("undefined") || error.message.includes("access")) {
+                dv.paragraph("**Possible solutions:**");
+                dv.list([
+                    "**Try restarting Obsidian** - this often resolves indexing issues",
+                    "Ensure all required files exist with proper metadata",
+                    "Check for syntax errors in frontmatter (must be valid YAML)"
+                ]);
+            } else {
+                dv.paragraph("**Possible solutions:**");
+                dv.list([
+                    "**Try restarting Obsidian** - this resolves most metadata-related issues",
+                    "Ensure all required plugin dependencies are installed and enabled",
+                    "Check console logs for more details (Ctrl+Shift+I or Cmd+Option+I)"
+                ]);
+            }
+        }
+    }
+
+    generateViewTable({ dv, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
+        try {
+            const __buildStart = this._getNowMs();
+            const currentPage = dv.current();
+
+            console.log(`[SIC] 🏢 Starting cached Related Hubs for subject: ${currentPage.subject}`);
+            console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+
+            // *** CRITICAL: Get cached data ONCE and reuse ***
+            const { SubjectIndexCache } = customJS;
+            const cachedPages = SubjectIndexCache.run(dv);
+            if (!cachedPages) {
+                console.log(`[SIC] ❌ Cache not available for Related Hubs`);
+                dv.paragraph("❌ Cache not available - cannot run cached version");
+                return;
+            }
+            
+            console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
+
+            // Check if currentPage exists
+            if (!currentPage) {
+                throw new Error("Could not access the current page metadata");
+            }
+            
+            // If domain-category is missing, silently no-op per user request
+            if (!currentPage["domain-category"]) {
+                return;
+            }
+            
+            // Get and normalize the domain category key
+            const domainCategoryKeys = this.normalizeValues(currentPage["domain-category"]);
+            
+            console.log(`[SIC] 🔍 Domain categories: [${domainCategoryKeys.join(', ')}]`);
+            console.log(`[SIC] 🔍 Current page type: ${currentPage.type || 'undefined'}`);
+
+            // Different behavior based on page type
+            if (currentPage.type === "hub") {
+                console.log(`[SIC] 🏢 Processing as Hub page`);
+                
+                // This is a Hub page - show all related Groups (Concept/Core Pattern) from cache
+                
+                // Adaptive header: "<Category Name> in this Hub" (e.g., "Movies in this Hub")
+                if (headerLevel > 0) {
+                    const hubCategory = (domainCategoryKeys && domainCategoryKeys.length > 0) ? domainCategoryKeys[0] : null;
+                    const hubCategoryName = hubCategory ? this.getDisplayNameForCategory({
+                        dv,
+                        domainCategory: hubCategory,
+                        subject: currentPage.subject,
+                        debug: false
+                    }) : "Items";
+                    dv.header(headerLevel, `${hubCategoryName} in this Hub`);
+                }
+
+                // Get related pages from cache - match any page that has at least one matching domain category
+                const relatedPages = cachedPages.filter(cachedPage => {
+                    const page = cachedPage._page;
+                    if (!page["domain-category"] || page.type === "hub") return false; // Exclude hub pages
+                    const pageCats = this.normalizeValues(page["domain-category"]);
+                    return pageCats.some(cat => domainCategoryKeys.includes(cat));
+                });
+
+                console.log(`[SIC] 🔍 Found ${relatedPages.length} related pages for hub`);
+
+                if (relatedPages.length > 0) {
+                    const pages = relatedPages.map(cp => cp._page);
+                    
+                    // Determine if Subject column is needed (multiple subjects present)
+                    const uniqueSubjects = Array.from(new Set(pages.map(p => p.subject).filter(Boolean)));
+                    const includeSubjectColumn = uniqueSubjects.length > 1;
+
+                    // Sort by name for consistency
+                    const sortedPages = [...pages].sort((a, b) => a.file.name.localeCompare(b.file.name));
+
+                    // Build columns: Name, Summary, Type, Domain, Subject (optional)
+                    const columns = ["Name", "Summary", "Type", "Domain"];
+                    if (includeSubjectColumn) columns.push("Subject");
+
+                    // Build rows
+                    const rows = sortedPages.map(p => {
+                        const row = [dv.fileLink(p.file.path, false, p.file.name), p.summary || "", p.type || "", p.domain || ""];
+                        if (includeSubjectColumn) row.push(p.subject || "");
+                        return row; 
+                    });
+
+                    dv.table(columns, rows);
+                } else {
+                    dv.paragraph("*No related Groups (Concepts/Core Patterns) found with matching domain categories. Please ensure pages have the appropriate frontmatter.*");
+                }
+
+            } else {
+                console.log(`[SIC] 🔍 Processing as regular page`);
+                
+                // This is a regular page - show related Groups (Concepts/Core Patterns) and link to ALL matching Hubs
+                
+                // Find ALL Hub pages for this domain-category from cache
+                const hubs = cachedPages.filter(cachedPage => {
+                    const page = cachedPage._page;
+                    if (page.type !== "hub" || !page["domain-category"]) return false;
+                    const hubCats = this.normalizeValues(page["domain-category"]);
+                    return hubCats.some(cat => domainCategoryKeys.includes(cat));
+                }).map(cp => cp._page);
+
+                console.log(`[SIC] 🔍 Found ${hubs.length} matching hubs`);
+                    
+                // Show links to all hubs if found and headerLevel is greater than 0
+                if (headerLevel > 0 && hubs.length > 0) {
+                    dv.header(headerLevel, `Related Hubs`);
+                }
+                
+                if (hubs.length > 0) {
+                    // Summary line
+                    const hubCountLabel = hubs.length === 1 ? 'Hub' : 'Hubs';
+                    dv.paragraph(`This page belongs to ${hubs.length} ${hubCountLabel}:`);
+                    // Proper bullet list of hub links
+                    const hubItems = hubs.map(hub => dv.fileLink(hub.file.path, false, hub.file.name));
+                    dv.list(hubItems);
+
+                    // Find other Groups (Concepts/Core Patterns) in ALL matching Hubs from cache
+                    const allRelatedGroups = cachedPages.filter(cachedPage => {
+                        const page = cachedPage._page;
+                        if (!page["domain-category"] || page.file.path === currentPage.file.path || page.type === "hub") return false;
+                        // Check if page matches any of the hubs
+                        const pageCats = this.normalizeValues(page["domain-category"]);
+                        return hubs.some(hub => {
+                            const hubCats = this.normalizeValues(hub["domain-category"]);
+                            return pageCats.some(cat => hubCats.includes(cat));
+                        });
+                    }).map(cp => cp._page);
+                    
+                    const relatedGroups = allRelatedGroups.sort(p => p.file.name);
+                    
+                    console.log(`[SIC] 🔍 Found ${relatedGroups.length} related groups across all hubs`);
+                        
+                    if (relatedGroups.length > 0) {
+                        if (headerLevel > 0) {
+                            const hubText = hubs.length === 1 ? "This Hub" : "These Hubs";
+                            dv.header(headerLevel + 0, `Peers in ${hubText}`);
+                        }
+                        
+                        // Get the first domain category to use as key column
+                        const categoryKey = domainCategoryKeys.length > 0 ? domainCategoryKeys[0] : null;
+                        
+                        // Check if any related group has a value for this category key
+                        const anyGroupHasKeyValue = categoryKey && relatedGroups.some(p => p[categoryKey]);
+                            
+                        // Include Subject column only if multiple subjects are present
+                        const uniqueSubjects = Array.from(new Set(relatedGroups.map(p => p.subject).filter(Boolean)));
+                        const includeSubjectColumn = uniqueSubjects.length > 1;
+                        // Include Hubs column only when listing across multiple hubs
+                        const includeHubsColumn = hubs.length > 1;
+                        
+                        if (categoryKey && anyGroupHasKeyValue) {
+                            // Sort by the key value
+                            const pagesArray = [...relatedGroups];
+                            pagesArray.sort((a, b) => {
+                                const aValue = a[categoryKey] || "";
+                                const bValue = b[categoryKey] || "";
+                                return aValue.localeCompare(bValue);
+                            });
+                            
+                            // Columns: Key, Name, Summary, Hubs?, Type, Domain, Subject?
+                            const columns = ["Key", "Name", "Summary"]; 
+                            if (includeHubsColumn) columns.push("Hubs");
+                            columns.push("Type", "Domain");
+                            if (includeSubjectColumn) columns.push("Subject");
+
+                            const rows = pagesArray.map(p => {
+                                const row = [
+                                    p[categoryKey] || "",
+                                    dv.fileLink(p.file.path, false, p.file.name),
+                                    p.summary || "",
+                                ];
+                                if (includeHubsColumn) {
+                                    // Determine which hubs this page relates to
+                                    const pageCats = this.normalizeValues(p["domain-category"] || []);
+                                    const matchingHubs = hubs.filter(h => {
+                                        const hubCats = this.normalizeValues(h["domain-category"] || []);
+                                        return pageCats.some(cat => hubCats.includes(cat));
+                                    });
+                                    const hubsCell = matchingHubs
+                                        .map(h => dv.fileLink(h.file.path, false, h.file.name))
+                                        .join(', ');
+                                    row.push(hubsCell);
+                                }
+                                row.push(p.type || "", p.domain || "");
+                                if (includeSubjectColumn) row.push(p.subject || "");
+                                return row;
+                            });
+
+                            dv.table(columns, rows);
+                        } else {
+                            // Fallback to original behavior if no domain categories or no groups have values for the key
+                            const pagesArray = [...relatedGroups];
+                            pagesArray.sort((a, b) => a.file.name.localeCompare(b.file.name));
+                            
+                            // Columns: Name, Summary, Hubs?, Type, Domain, Subject?
+                            const columns = ["Name", "Summary"]; 
+                            if (includeHubsColumn) columns.push("Hubs");
+                            columns.push("Type", "Domain");
+                            if (includeSubjectColumn) columns.push("Subject");
+
+                            const rows = pagesArray.map(p => {
+                                const row = [
+                                    dv.fileLink(p.file.path, false, p.file.name),
+                                    p.summary || "",
+                                ];
+                                if (includeHubsColumn) {
+                                    const pageCats = this.normalizeValues(p["domain-category"] || []);
+                                    const matchingHubs = hubs.filter(h => {
+                                        const hubCats = this.normalizeValues(h["domain-category"] || []);
+                                        return pageCats.some(cat => hubCats.includes(cat));
+                                    });
+                                    const hubsCell = matchingHubs
+                                        .map(h => dv.fileLink(h.file.path, false, h.file.name))
+                                        .join(', ');
+                                    row.push(hubsCell);
+                                }
+                                row.push(p.type || "", p.domain || "");
+                                if (includeSubjectColumn) row.push(p.subject || "");
+                                return row;
+                            });
+
+                            dv.table(columns, rows);
+                        }
+                    } 
+                } else {
+                    // Silently no-op when no hubs are found for this domain-category
+                    return;
+                }
+            }
+
+            const __methodEnd = this._getNowMs();
+            const buildTime = Math.round(__methodEnd - __buildStart);
+            console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+            console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+            console.log(`[SIC] ✅ Cached Related Hubs completed in ${buildTime}ms`);
+
+            if (showTimestamp) {
+                this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
             }
         } catch (error) {
             dv.header(headerLevel, "⚠️ Error Loading Content");
@@ -2666,10 +2951,232 @@ class ConceptManager {
      * @param {boolean} [params.showTimestamp=false] - Render a timestamp footer for this section
      * @param {boolean} [params.showTimeBuild=false] - Include build duration in timestamp (wrapper augments with settle time)
      */
+    /**
+     * CACHED version of renderConceptClassifications
+     * Uses SubjectIndexCache for name/alias lookups instead of vault scanning
+     */
+    renderConceptClassificationsCached({ dv, relationTypes, headerLevel = 2, subject, showTable = false, debug = false, showTimestamp = false, showTimeBuild = false }) {
+        const __buildStart = this._getNowMs();
+        const currentPage = dv.current();
+        const currentSubject = subject || currentPage.subject;
+
+        console.log(`[SIC] 🚀 Starting cached Classifications for subject: ${currentSubject}`);
+        console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+
+        // Use SubjectIndexCache instead of vault scanning
+        const { SubjectIndexCache } = customJS;
+        const cachedPages = SubjectIndexCache.run(dv);
+        
+        if (!cachedPages) {
+            console.log(`[SIC] ❌ Cache not available - falling back to original method`);
+            dv.paragraph("❌ Cache not available - cannot run cached version");
+            return;
+        }
+
+        console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
+
+        // Get config (same as original)
+        const config = SubjectIndexCache.getConfig(dv, currentSubject);
+        
+        // Compute all requested values across all relation types (same logic as original)
+        const requestedValuesLower = new Set();
+        (relationTypes || []).forEach(type => {
+            const currentValues = currentPage["group-" + type] || [];
+            const normalizedValues = SubjectIndexCache.normalizeValues(currentValues)
+                .map(v => String(v).trim())
+                .filter(v => v.length > 0);
+            normalizedValues.forEach(v => requestedValuesLower.add(v.toLowerCase()));
+        });
+
+        console.log(`[SIC] 🔍 Looking for values: [${Array.from(requestedValuesLower).join(', ')}]`);
+
+        // FIXED: Build lookup maps from already-retrieved cache data (no additional cache calls)
+        const __cacheToken = this._getNowMs();
+        const byName = new Map();
+        const byAlias = new Map();
+        
+        cachedPages.forEach(cachedPage => {
+            const page = cachedPage._page;
+            const fileName = (page.file?.name || page.file?.basename || '').toLowerCase();
+            const aliases = (cachedPage.aliases || []).map(a => a.toLowerCase());
+            
+            if (requestedValuesLower.has(fileName)) {
+                byName.set(fileName, page);
+            }
+            aliases.forEach(alias => {
+                if (requestedValuesLower.has(alias)) {
+                    byAlias.set(alias, page);
+                }
+            });
+        });
+        const cacheTime = this._getNowMs() - __cacheToken;
+        
+        console.log(`[SIC] ⚡ Cache lookup completed in ${cacheTime.toFixed(2)}ms`);
+        console.log(`[SIC] 📊 Found ${byName.size} name matches, ${byAlias.size} alias matches`);
+
+        // Insert wrapper header "Classifications" (same as original)
+        const presentTypes = relationTypes.filter(type => {
+            const currentValues = currentPage["group-" + type];
+            const normalized = SubjectIndexCache.normalizeValues(currentValues || [])
+                .map(v => String(v).trim())
+                .filter(v => v.length > 0);
+            return normalized.length > 0;
+        });
+
+        if (presentTypes.length > 0 && headerLevel > 0) {
+            dv.header(headerLevel, `Classifications`);
+        }
+
+        // Process each relation type (same logic as original)
+        const classificationTableRows = [];
+        const bulletSections = [];
+        const bulletSubjects = new Set();
+
+        relationTypes.forEach((type, index) => {
+            if (debug) {
+                dv.paragraph(`**Step 3.${index + 1}: Processing relation type "${type}" (CACHED)**`);
+            }
+            
+            const hubCategory = type.replace('group-', '');
+            
+            if (debug) {
+                dv.paragraph(`Hub category to look for: "${hubCategory}"`);
+                dv.paragraph(`Looking for hub with: type="hub" AND domain-category="${hubCategory}"`);
+            }
+            
+            // Get display name (can reuse original ConceptManager method)
+            const headerText = this.getDisplayNameForCategory({
+                dv,
+                domainCategory: hubCategory,
+                subject: currentSubject,
+                debug
+            });
+                    
+            const groupFieldName = `group-${type}`;
+            const currentValues = currentPage[groupFieldName];
+            
+            if (!currentValues) {
+                if (debug) {
+                    dv.paragraph(`**Current page has no ${groupFieldName} field - skipping**`);
+                }
+                return;
+            }
+
+            const normalizedCurrentValues = SubjectIndexCache.normalizeValues(currentValues)
+                .map(v => String(v).trim())
+                .filter(v => v.length > 0);
+                
+            if (normalizedCurrentValues.length === 0) {
+                if (debug) {
+                    dv.paragraph(`**Current page has empty ${groupFieldName} field - skipping**`);
+                }
+                return;
+            }
+
+            if (debug) {
+                dv.paragraph(`**Current page ${groupFieldName}: [${normalizedCurrentValues.join(', ')}]**`);
+            }
+
+            // Find matching concepts using cached lookups
+            const foundConcepts = [];
+            normalizedCurrentValues.forEach(value => {
+                const valueLower = value.toLowerCase();
+                
+                // Check name matches
+                if (byName.has(valueLower)) {
+                    foundConcepts.push({
+                        concept: byName.get(valueLower),
+                        matchType: 'name',
+                        matchValue: value
+                    });
+                }
+                
+                // Check alias matches
+                if (byAlias.has(valueLower)) {
+                    foundConcepts.push({
+                        concept: byAlias.get(valueLower),
+                        matchType: 'alias', 
+                        matchValue: value
+                    });
+                }
+            });
+
+            if (debug) {
+                dv.paragraph(`**Found ${foundConcepts.length} matching concepts for ${groupFieldName}**`);
+            }
+
+            // Display results (same format as original)
+            if (foundConcepts.length > 0) {
+                // Create bullet section
+                const bullets = foundConcepts.map(({ concept, matchType, matchValue }) => {
+                    const link = dv.fileLink(concept.file.path, false, concept.file.name);
+                    // Only show subject if it differs from current page's subject
+                    const projectNote = (concept.subject && concept.subject !== currentSubject) ? ` (${concept.subject})` : '';
+                    return `${link}${projectNote}`;
+                });
+                
+                bulletSections.push({
+                    headerText,
+                    bullets,
+                    type,
+                    hubCategory
+                });
+
+                // Collect unique subjects
+                foundConcepts.forEach(({ concept }) => {
+                    if (concept.subject) {
+                        bulletSubjects.add(concept.subject);
+                    }
+                });
+
+                // Add to classification table
+                foundConcepts.forEach(({ concept, matchValue }) => {
+                    classificationTableRows.push([
+                        headerText,
+                        dv.fileLink(concept.file.path, false, concept.file.name),
+                        concept.subject || "",
+                        matchValue
+                    ]);
+                });
+            }
+        });
+
+        // Display bullet sections (same as original)
+        bulletSections.forEach(({ headerText, bullets }) => {
+            dv.header(headerLevel + 1, headerText);
+            dv.list(bullets);
+        });
+
+        // Display table if requested (same as original) 
+        if (showTable && classificationTableRows.length > 0) {
+            dv.header(headerLevel + 1, "Classifications Summary");
+            const includeSubjectColumn = bulletSubjects.size > 1;
+            const headers = ["Category", "Concept", ...(includeSubjectColumn ? ["Subject"] : []), "Matched Value"];
+            const tableData = classificationTableRows.map(row => 
+                includeSubjectColumn ? row : [row[0], row[1], row[3]]
+            );
+            dv.table(headers, tableData);
+        }
+
+        const __methodEnd = this._getNowMs();
+        const buildTime = Math.round(__methodEnd - __buildStart);
+        console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        console.log(`[SIC] ✅ Cached Classifications completed in ${buildTime}ms`);
+
+        // Timestamp (same as original)
+        if (showTimestamp) {
+            this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
+        }
+    }
+
     renderConceptClassifications({ dv, relationTypes, headerLevel = 2, subject, showTable = false, debug = false, showTimestamp = false, showTimeBuild = false }) {
         const __buildStart = this._getNowMs();
         const currentPage = dv.current();
         const currentSubject = subject || currentPage.subject;
+        
+        console.log(`[LEGACY] 🐌 Starting LEGACY Classifications for subject: ${currentSubject}`);
+        console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         // Fetch config for gating and build sets for early filtering
         const __cfgForClassifications = this.getConfigForSubject({ dv, subject: currentSubject, debug: false });
@@ -2934,9 +3441,16 @@ class ConceptManager {
                 dv.table(headers, rows);
             }
         }
+        
+        const __legacyMethodEnd = this._getNowMs();
+        const legacyBuildTime = Math.round(__legacyMethodEnd - __buildStart);
+        console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__legacyMethodEnd}ms`);
+        console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${legacyBuildTime}ms`);
+        console.log(`[LEGACY] ✅ Legacy Classifications completed in ${legacyBuildTime}ms`);
+        
         // Timestamp footer (below bullets/table) when section is present
         if (presentTypes.length > 0 && showTimestamp) {
-            this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
+            this._renderTimestamp({ dv, label: 'LEGACY Rendered at', durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
         }
     }
 
@@ -2951,11 +3465,14 @@ class ConceptManager {
      * @param {number} [params.headerLevel=2] - Header level to use
      * @param {boolean} [params.debug=false] - Enable debug logging
      */
-    renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
+    renderKeyConnectionsForConceptLegacy({ dv, relationTypes, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
         const __buildStart = this._getNowMs();
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
         const groupValue = currentPage.file.name;
+
+        console.log(`[LEGACY] 🔗 Starting LEGACY Key Connections for subject: ${currentSubject}`);
+        console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         const config = this.getConfigForSubject({ dv, subject: currentSubject, debug: false });
 
@@ -3084,7 +3601,139 @@ class ConceptManager {
                 : keyConnectionsTableRows.map(r => r.slice(0, 3));
 
             dv.table(headers, rows);
-            if (showTimestamp) this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
+        }
+
+        const __methodEnd = this._getNowMs();
+        const buildTime = Math.round(__methodEnd - __buildStart);
+        console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        console.log(`[LEGACY] ✅ Legacy Key Connections completed in ${buildTime}ms`);
+
+        if (showTimestamp) {
+            this._renderTimestamp({ dv, label: 'LEGACY Rendered at', durationMs: showTimeBuild ? buildTime : null });
+        }
+    }
+
+    renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
+        const __buildStart = this._getNowMs();
+        const currentPage = dv.current();
+        const currentSubject = currentPage.subject;
+        const groupValue = currentPage.file.name;
+
+        console.log(`[SIC] 🔗 Starting cached Key Connections for subject: ${currentSubject}`);
+        console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+
+        // *** CRITICAL: Get cached data ONCE and reuse ***
+        const { SubjectIndexCache } = customJS;
+        const cachedPages = SubjectIndexCache.run(dv);
+        if (!cachedPages) {
+            console.log(`[SIC] ❌ Cache not available for Key Connections`);
+            return;
+        }
+        
+        console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
+
+        // Filter cached pages for eligible connections (same logic as legacy)
+        const eligibleForGroups = cachedPages.filter(cachedPage => {
+            const page = cachedPage._page;
+            if (page.file?.path === currentPage.file.path) return false; // exclude current page
+            return true; // subject/domain gating already applied in cache
+        });
+
+        console.log(`[SIC] 🔍 Found ${eligibleForGroups.length} eligible pages for connections`);
+
+        // *** BUILD HUB LOOKUP FROM CACHE (avoid vault queries) ***
+        const hubLookup = new Map(); // domainCategory -> relation label
+        cachedPages
+            .filter(cachedPage => cachedPage._page.type === 'hub' && cachedPage._page.subject === currentSubject)
+            .forEach(hubPage => {
+                const page = hubPage._page;
+                const hubCategories = this.normalizeValues(page['domain-category'] || []);
+                hubCategories.forEach(category => {
+                    const relationLabel = page['relation-outgoing'] || category; // Use simple fallback to avoid vault queries
+                    hubLookup.set(category, relationLabel);
+                });
+            });
+        console.log(`[SIC] 🏢 Built hub lookup from cache: ${hubLookup.size} categories`);
+
+        // Collect rows for consolidated table
+        const keyConnectionsTableRows = [];
+
+        // Build matches from cached data (same logic as legacy)
+        const matchesByType = new Map();
+        const groupValueLower = String(groupValue).toLowerCase();
+        (relationTypes || []).forEach(type => {
+            const groupFieldName = `group-${type}`;
+            const matches = eligibleForGroups.filter(cachedPage => {
+                const vals = cachedPage[groupFieldName];
+                if (!vals) return false;
+                const pageValues = this.normalizeValues(vals);
+                return pageValues.some(val => String(val).toLowerCase() === groupValueLower);
+            });
+            matchesByType.set(type, matches);
+            console.log(`[SIC] 🔍 Found ${matches.length} matches for relation type: ${type}`);
+        });
+
+        // Compute total connections using cached matches
+        let totalConnections = 0;
+        (relationTypes || []).forEach(type => {
+            const matches = matchesByType.get(type) || [];
+            totalConnections += matches.length;
+        });
+
+        if (totalConnections > 0 && headerLevel > 0) {
+            dv.header(headerLevel, `Key Connections`);
+        }
+
+        // Render connections from cached data
+        (relationTypes || []).forEach(type => {
+            const matches = matchesByType.get(type) || [];
+            if (matches.length === 0) return; // skip empty
+
+            const matchingPages = matches.map(cachedPage => cachedPage._page).sort(p => p.file.name);
+
+            // *** USE CACHED HUB LOOKUP (no vault queries) ***
+            const relationLabel = hubLookup.get(type) || type;
+
+            // Build table rows (same format as legacy)
+            const relationCount = matchingPages.length;
+            matchingPages.forEach((page, index) => {
+                const labelCell = index === 0 ? `**${relationLabel}** (${relationCount})` : "";
+                const pageLink = dv.fileLink(page.file.path, false, page.file.name);
+                const summaryText = page.summary || "";
+                const subjectText = page.subject || "";
+                keyConnectionsTableRows.push([labelCell, pageLink, summaryText, subjectText]);
+            });
+        });
+
+        // Render consolidated table (same logic as legacy)
+        if (keyConnectionsTableRows.length > 0) {
+            const uniqueSubjects = Array.from(new Set(
+                keyConnectionsTableRows
+                    .map(r => r[3])
+                    .filter(s => s && String(s).trim().length > 0)
+            ));
+            const includeSubjectColumn = uniqueSubjects.length > 1;
+
+            const headers = includeSubjectColumn
+                ? ["Connection", "Pages", "Summary", "Subjects"]
+                : ["Connection", "Pages", "Summary"];
+
+            const rows = includeSubjectColumn
+                ? keyConnectionsTableRows
+                : keyConnectionsTableRows.map(r => r.slice(0, 3));
+
+            dv.table(headers, rows);
+        }
+
+        const __methodEnd = this._getNowMs();
+        const buildTime = Math.round(__methodEnd - __buildStart);
+        console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        console.log(`[SIC] ✅ Cached Key Connections completed in ${buildTime}ms`);
+
+        if (showTimestamp) {
+            this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
         }
     }
 
@@ -3099,10 +3748,13 @@ class ConceptManager {
      * @param {number} [params.headerLevel=2] - Header level to use
      * @param {boolean} [params.debug=false] - Enable debug logging
      */
-    renderTopRelatedContent({ dv, relationTypes, validSubjects, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
+    renderTopRelatedContentLegacy({ dv, relationTypes, validSubjects, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
         const __buildStart = this._getNowMs();
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
+
+        console.log(`[LEGACY] 📚 Starting LEGACY Related Content for subject: ${currentSubject}`);
+        console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         // Default validSubjects to current subject if not provided
         const subjectsToUse = (validSubjects && validSubjects.length > 0) ? validSubjects : [currentSubject];
@@ -3162,7 +3814,6 @@ class ConceptManager {
 
             if (filteredResults.length === 0) {
                 dv.paragraph("No related \"CONCEPTS\" found.");
-                if (showTimestamp) this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
             } else {
             // Include Subject column if results span multiple subjects (within the subjectsToUse filter)
             const uniqueSubjects = Array.from(new Set(filteredResults.map(r => r.concept.subject).filter(Boolean)));
@@ -3178,7 +3829,153 @@ class ConceptManager {
             ]);
 
             dv.table(headers, rows);
-            if (showTimestamp) this._renderTimestamp({ dv, durationMs: showTimeBuild ? (this._getNowMs() - __buildStart) : null });
+        }
+
+        const __methodEnd = this._getNowMs();
+        const buildTime = Math.round(__methodEnd - __buildStart);
+        console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        console.log(`[LEGACY] ✅ Legacy Related Content completed in ${buildTime}ms`);
+
+        if (showTimestamp) {
+            this._renderTimestamp({ dv, label: 'LEGACY Rendered at', durationMs: showTimeBuild ? buildTime : null });
+        }
+    }
+
+    renderTopRelatedContent({ dv, relationTypes, validSubjects, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
+        const __buildStart = this._getNowMs();
+        const currentPage = dv.current();
+        const currentSubject = currentPage.subject;
+
+        console.log(`[SIC] 📚 Starting cached Related Content for subject: ${currentSubject}`);
+        console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+
+        // *** CRITICAL: Get cached data ONCE and reuse ***
+        const { SubjectIndexCache } = customJS;
+        const cachedPages = SubjectIndexCache.run(dv);
+        if (!cachedPages) {
+            console.log(`[SIC] ❌ Cache not available for Related Content`);
+            dv.paragraph("❌ Cache not available - cannot run cached version");
+            return;
+        }
+        
+        console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
+
+        // Default validSubjects to current subject if not provided
+        const subjectsToUse = (validSubjects && validSubjects.length > 0) ? validSubjects : [currentSubject];
+
+        // Build match criteria from current page's group-* fields and domain-category
+        const matchCriteria = {};
+        
+        if (currentPage["domain-category"]) {
+            matchCriteria["domain-category"] = true;
+        }
+        
+        (relationTypes || []).forEach(type => {
+            const groupFieldName = `group-${type}`;
+            const values = currentPage[groupFieldName];
+            if (values) {
+                matchCriteria[groupFieldName] = true;
+            }
+        });
+
+        console.log(`[SIC] 🔍 Match criteria: ${Object.keys(matchCriteria).join(', ')}`);
+
+        // *** CRITICAL: Implement getRelatedConcepts logic using cached data (no vault queries) ***
+        const related = [];
+        
+        // Filter eligible pages from cache (exclude current page, filter by valid subjects)
+        const eligiblePages = cachedPages.filter(cachedPage => {
+            const page = cachedPage._page;
+            if (page.file?.path === currentPage.file.path) return false; // exclude current page
+            if (!subjectsToUse.includes(page.subject)) return false; // filter by valid subjects
+            return true;
+        });
+
+        console.log(`[SIC] 🔍 Found ${eligiblePages.length} eligible pages for related content`);
+
+        // For each eligible page, calculate confidence based on shared values
+        eligiblePages.forEach(cachedPage => {
+            const page = cachedPage._page;
+            let confidence = 0;
+            let matchedFields = 0;
+
+            // Check domain-category matching
+            if (matchCriteria["domain-category"] && currentPage["domain-category"] && page["domain-category"]) {
+                const currentDomainCats = this.normalizeValues(currentPage["domain-category"]);
+                const pageDomainCats = this.normalizeValues(page["domain-category"]);
+                const intersection = currentDomainCats.filter(cat => pageDomainCats.includes(cat));
+                if (intersection.length > 0) {
+                    confidence += (intersection.length / Math.max(currentDomainCats.length, pageDomainCats.length)) * 100;
+                    matchedFields++;
+                }
+            }
+
+            // Check group-* field matching
+            Object.keys(matchCriteria).forEach(fieldName => {
+                if (fieldName === "domain-category") return; // already handled above
+                
+                const currentValues = this.normalizeValues(currentPage[fieldName] || []);
+                const pageValues = this.normalizeValues(page[fieldName] || []);
+                
+                if (currentValues.length > 0 && pageValues.length > 0) {
+                    const intersection = currentValues.filter(val => 
+                        pageValues.some(pVal => String(val).toLowerCase() === String(pVal).toLowerCase())
+                    );
+                    if (intersection.length > 0) {
+                        confidence += (intersection.length / Math.max(currentValues.length, pageValues.length)) * 100;
+                        matchedFields++;
+                    }
+                }
+            });
+
+            // Only include if there's at least one match
+            if (matchedFields > 0) {
+                related.push({
+                    concept: page,
+                    confidence: confidence / matchedFields, // average confidence across matched fields
+                    matchedFields
+                });
+            }
+        });
+
+        const filteredResults = related
+            .filter(r => r.concept.file.path !== currentPage.file.path)
+            .filter(r => subjectsToUse.includes(r.concept.subject))
+            .sort((a, b) => b.confidence - a.confidence);
+
+        console.log(`[SIC] 📊 Found ${related.length} related concepts, ${filteredResults.length} after filtering`);
+
+        // Display related concepts section
+        dv.header(headerLevel, "Related Content");
+
+        if (filteredResults.length === 0) {
+            dv.paragraph("No related \"CONCEPTS\" found.");
+        } else {
+            // Include Subject column if results span multiple subjects (within the subjectsToUse filter)
+            const uniqueSubjects = Array.from(new Set(filteredResults.map(r => r.concept.subject).filter(Boolean)));
+            const includeSubjectColumn = uniqueSubjects.length > 1;
+
+            const headers = ["Name", "Type", "Domain", "Confidence", ...(includeSubjectColumn ? ["Subject"] : [])];
+            const rows = filteredResults.map(r => [
+                dv.fileLink(r.concept.file.path, false, r.concept.file.name),
+                r.concept.type || "",
+                r.concept.domain || "",  
+                `${r.confidence.toFixed(1)}%`,
+                ...(includeSubjectColumn ? [r.concept.subject || ""] : [])
+            ]);
+
+            dv.table(headers, rows);
+        }
+
+        const __methodEnd = this._getNowMs();
+        const buildTime = Math.round(__methodEnd - __buildStart);
+        console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        console.log(`[SIC] ✅ Cached Related Content completed in ${buildTime}ms`);
+
+        if (showTimestamp) {
+            this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
         }
     }
 
@@ -3366,7 +4163,7 @@ class ConceptManager {
      * @param {Object} params - Parameters object
      * @param {Object} params.dv - The Dataview API object
      * @param {number} [params.headerLevel=2] - The level for headers (1-6)
-     * @param {Array<string>} [params.enabledSteps=['relatedContent', 'directConnections', 'relatedHubs']] - Which view steps to execute
+     * @param {Array<string>} [params.enabledSteps=['contentClassifications_legacy', 'contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs']] - Which view steps to execute
      * @param {boolean} [params.debug=false] - Enable debug logging
      * 
      * @example
@@ -3387,7 +4184,7 @@ class ConceptManager {
      * });
      * ```
      */
-     generateSmartView({ dv, headerLevel = 2, enabledSteps = ['contentClassifications', 'keyConnections', 'relatedContent', 'relatedHubs'], debug = false, showTimestamp = true, showTimeBuild = true }) {
+     generateSmartView({ dv, headerLevel = 2, enabledSteps = ['cachePrep', 'contentClassifications_legacy', 'contentClassifications', 'keyConnections_legacy', 'keyConnections', 'relatedContent_legacy', 'relatedContent', 'relatedHubs_legacy', 'relatedHubs'], debug = false, showTimestamp = true, showTimeBuild = true }) {
         try {
             if (debug) {
                 dv.header(headerLevel, "🔬 Smart View Generator - Debug Mode");
@@ -3446,102 +4243,188 @@ class ConceptManager {
 
             let viewsGenerated = 0;
 
-            // New order: Classifications → Key Connections → Related Content → Related Hubs
-
             // Determine eligibility once
             const domainIsConceptual = currentPage.domain === "concepts" || currentPage.domain === "patterns";
 
-            // Section: contentClassifications
+            // Section: cachePrep (cache preparation - runs FIRST to build cache for all subsequent operations)
+            const cachePrepEnabled = enabledSteps.includes('cachePrep') && currentPage.subject;
+            if (debug) {
+                dv.paragraph(`**Cache Preparation Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('cachePrep') ? "Yes" : "No"}`);
+                dv.paragraph(`Has subject: ${currentPage.subject ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Cache Prep: ${cachePrepEnabled ? "Yes" : "No"}`);
+            }
+            if (cachePrepEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "🔧 Cache Preparation");
+                this.prepareCacheForSubject({ 
+                    dv, 
+                    headerLevel: headerLevel + 1, 
+                    debug, 
+                    showTimestamp, 
+                    showTimeBuild 
+                });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Cache Preparation`);
+                dv.paragraph("---");
+            }
+
+            // Section order: Cache Prep → Classifications → Key Connections → Related Content → Related Hubs
+
+            // Section: contentClassifications_legacy (original version)
+            const classificationsLegacyEnabled = enabledSteps.includes('contentClassifications_legacy') && domainIsConceptual;
+            if (debug) {
+                dv.paragraph(`**Content Classifications Legacy Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('contentClassifications_legacy') ? "Yes" : "No"}`);
+                dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Classifications Legacy: ${classificationsLegacyEnabled ? "Yes" : "No"}`);
+            }
+            if (classificationsLegacyEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "🔄 LEGACY Classifications");
+                const relationTypes = configData.validFilters || [];
+                this.renderConceptClassifications({ dv, relationTypes, headerLevel: headerLevel + 1, subject: currentPage.subject, showTable: false, debug, showTimestamp, showTimeBuild });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Classifications Legacy`);
+                dv.paragraph("---");
+            }
+
+            // Section: contentClassifications (cached version)
             const classificationsEnabled = enabledSteps.includes('contentClassifications') && domainIsConceptual;
             if (debug) {
-                dv.paragraph(`**Content Classifications Check**`);
+                dv.paragraph(`**Content Classifications Cached Check**`);
                 dv.paragraph(`Step enabled: ${enabledSteps.includes('contentClassifications') ? "Yes" : "No"}`);
                 dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
-                dv.paragraph(`Should run Classifications: ${classificationsEnabled ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Classifications Cached: ${classificationsEnabled ? "Yes" : "No"}`);
             }
             if (classificationsEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Classifications");
                 const relationTypes = configData.validFilters || [];
-                this.renderConceptClassifications({ dv, relationTypes, headerLevel, subject: currentPage.subject, showTable: false, debug, showTimestamp, showTimeBuild });
+                this.renderConceptClassificationsCached({ dv, relationTypes, headerLevel: headerLevel + 1, subject: currentPage.subject, showTable: false, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
             } else if (debug) {
-                dv.paragraph(`❌ Skipping Classifications`);
+                dv.paragraph(`❌ Skipping Classifications Cached`);
                 dv.paragraph("---");
             }
 
-            // Section: keyConnections
+            // Section: keyConnections_legacy (original version)
+            const keyConnectionsLegacyEnabled = enabledSteps.includes('keyConnections_legacy') && domainIsConceptual;
+            if (debug) {
+                dv.paragraph(`**Key Connections Legacy Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('keyConnections_legacy') ? "Yes" : "No"}`);
+                dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Key Connections Legacy: ${keyConnectionsLegacyEnabled ? "Yes" : "No"}`);
+            }
+            if (keyConnectionsLegacyEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "🔄 LEGACY Key Connections");
+                const relationTypes = configData.validFilters || [];
+                this.renderKeyConnectionsForConceptLegacy({ dv, relationTypes, headerLevel: headerLevel + 1, debug, showTimestamp, showTimeBuild });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Key Connections Legacy`);
+                dv.paragraph("---");
+            }
+
+            // Section: keyConnections (cached version)
             const keyConnectionsEnabled = enabledSteps.includes('keyConnections') && domainIsConceptual;
             if (debug) {
-                dv.paragraph(`**Key Connections Check**`);
+                dv.paragraph(`**Key Connections Cached Check**`);
                 dv.paragraph(`Step enabled: ${enabledSteps.includes('keyConnections') ? "Yes" : "No"}`);
                 dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
-                dv.paragraph(`Should run Key Connections: ${keyConnectionsEnabled ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Key Connections Cached: ${keyConnectionsEnabled ? "Yes" : "No"}`);
             }
             if (keyConnectionsEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Key Connections");
                 const relationTypes = configData.validFilters || [];
-                this.renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel, debug, showTimestamp, showTimeBuild });
+                this.renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel: headerLevel + 1, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
             } else if (debug) {
-                dv.paragraph(`❌ Skipping Key Connections`);
+                dv.paragraph(`❌ Skipping Key Connections Cached`);
                 dv.paragraph("---");
             }
 
-            // Section: relatedContent
+            // Section: relatedContent_legacy (original version)
+            const relatedContentLegacyEnabled = enabledSteps.includes('relatedContent_legacy') && domainIsConceptual;
+            if (debug) {
+                dv.paragraph(`**Related Content Legacy Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('relatedContent_legacy') ? "Yes" : "No"}`);
+                dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Related Content Legacy: ${relatedContentLegacyEnabled ? "Yes" : "No"}`);
+            }
+            if (relatedContentLegacyEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "🔄 LEGACY Related Content");
+                const relationTypes = configData.validFilters || [];
+                this.renderTopRelatedContentLegacy({ dv, relationTypes, headerLevel: headerLevel + 1, debug, showTimestamp, showTimeBuild });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Related Content Legacy`);
+                dv.paragraph("---");
+            }
+
+            // Section: relatedContent (cached version)
             const relatedContentEnabled = enabledSteps.includes('relatedContent') && domainIsConceptual;
             if (debug) {
-                dv.paragraph(`**Related Content Check**`);
+                dv.paragraph(`**Related Content Cached Check**`);
                 dv.paragraph(`Step enabled: ${enabledSteps.includes('relatedContent') ? "Yes" : "No"}`);
                 dv.paragraph(`Domain requirement met: ${domainIsConceptual ? "Yes" : "No"}`);
-                dv.paragraph(`Should run Related Content: ${relatedContentEnabled ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Related Content Cached: ${relatedContentEnabled ? "Yes" : "No"}`);
             }
             if (relatedContentEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Related Content");
                 const relationTypes = configData.validFilters || [];
-                this.renderTopRelatedContent({ dv, relationTypes, headerLevel, debug, showTimestamp, showTimeBuild });
+                this.renderTopRelatedContent({ dv, relationTypes, headerLevel: headerLevel + 1, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
             } else if (debug) {
-                dv.paragraph(`❌ Skipping Related Content`);
+                dv.paragraph(`❌ Skipping Related Content Cached`);
                 dv.paragraph("---");
             }
             
 
 
-            // Step 5: Check if we should run view table (group relationships)
-            const step5Enabled = enabledSteps.includes('relatedHubs');
-            const hasDomainCategoryForTable = !!currentPage["domain-category"];
-            const shouldRunViewTable = step5Enabled && hasDomainCategoryForTable;
-            
+            // Section: relatedHubs_legacy (original version)
+            const relatedHubsLegacyEnabled = enabledSteps.includes('relatedHubs_legacy') && !!currentPage["domain-category"];
             if (debug) {
-                dv.paragraph(`**Step 4: View Table (Group Relationships) Check**`);
-                dv.paragraph(`Step enabled: ${step5Enabled ? "Yes" : "No"}`);
-                dv.paragraph(`Has domain-category: ${hasDomainCategoryForTable ? "Yes" : "No"}`);
-                dv.paragraph(`Should run view table: ${shouldRunViewTable ? "Yes" : "No"}`);
-                dv.paragraph(`Reasoning: ${!step5Enabled ? "Step disabled by enabledSteps parameter" : !hasDomainCategoryForTable ? "No domain-category found in frontmatter" : "All requirements met"}`);
+                dv.paragraph(`**Related Hubs Legacy Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('relatedHubs_legacy') ? "Yes" : "No"}`);
+                dv.paragraph(`Has domain-category: ${!!currentPage["domain-category"] ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Related Hubs Legacy: ${relatedHubsLegacyEnabled ? "Yes" : "No"}`);
             }
-
-            if (shouldRunViewTable) {
-                if (debug) {
-                    dv.paragraph(`**Executing View Table (Group Relationships)...**`);
-                }
-                
-                // Generate view table
-                this.generateViewTable({ 
+            if (relatedHubsLegacyEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "🔄 LEGACY Related Hubs");
+                this.generateViewTableLegacy({ 
                     dv, 
-                    headerLevel,
+                    headerLevel: headerLevel + 1,
                     debug: debug,
                     showTimestamp,
                     showTimeBuild
                 });
-                
                 viewsGenerated++;
-                
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Related Hubs Legacy`);
+                dv.paragraph("---");
+            }
+
+            // Section: relatedHubs (cached version)
+            const relatedHubsEnabled = enabledSteps.includes('relatedHubs') && !!currentPage["domain-category"];
                 if (debug) {
-                    dv.paragraph(`✅ View table completed. Views generated so far: ${viewsGenerated}`);
-                    dv.paragraph("---");
+                dv.paragraph(`**Related Hubs Cached Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('relatedHubs') ? "Yes" : "No"}`);
+                dv.paragraph(`Has domain-category: ${!!currentPage["domain-category"] ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Related Hubs Cached: ${relatedHubsEnabled ? "Yes" : "No"}`);
                 }
-            } else {
-                if (debug) {
-                    dv.paragraph(`❌ Skipping view table - ${!step5Enabled ? "step disabled by user" : "no domain-category found"}`);
+            if (relatedHubsEnabled) {
+                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Related Hubs");
+                this.generateViewTable({ 
+                    dv, 
+                    headerLevel: headerLevel + 1,
+                    debug: debug,
+                    showTimestamp,
+                    showTimeBuild
+                });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Related Hubs Cached`);
                     dv.paragraph("---");
-                }
             }
 
             // Final summary
@@ -3643,6 +4526,79 @@ class ConceptManager {
             dv.paragraph("Please check your parameters and try again.");
             console.error("Error in generateSmartView:", error);
         }
+    }
+    /**
+     * Cache Preparation Section - Builds SubjectIndexCache and displays statistics
+     * This section does no actual content generation, just cache preparation and timing
+     */
+    prepareCacheForSubject({ dv, headerLevel = 2, debug = false, showTimestamp = false, showTimeBuild = false }) {
+        try {
+            const __buildStart = this._getNowMs();
+            const currentPage = dv.current();
+            const currentSubject = currentPage.subject;
+
+            // *** INTELLIGENT CACHE PREPARATION ***
+            const { SubjectIndexCache } = customJS;
+            
+            // Use existing cache or build if needed (normal cache behavior)
+            const cacheStartTime = this._getNowMs();
+            const cachedPages = SubjectIndexCache.run(dv);
+            const cacheEndTime = this._getNowMs();
+            const cacheBuildTime = Math.round(cacheEndTime - cacheStartTime);
+
+            if (!cachedPages) {
+                console.log(`[CACHE PREP] ❌ Cache preparation failed`);
+                return;
+            }
+
+            const __methodEnd = this._getNowMs();
+            const buildTime = Math.round(__methodEnd - __buildStart);
+            
+            // Report whether cache was built fresh or reused
+            if (cacheBuildTime > 50) {
+                console.log(`[CACHE PREP] ✅ Cache built FRESH in ${cacheBuildTime}ms (${cachedPages.length} pages) - Total method time: ${buildTime}ms`);
+            } else {
+                console.log(`[CACHE PREP] ✅ Cache REUSED existing in ${cacheBuildTime}ms (${cachedPages.length} pages) - Total method time: ${buildTime}ms`);
+            }
+
+            if (showTimestamp) {
+                this._renderTimestamp({ dv, label: 'CACHE PREP Rendered at', durationMs: showTimeBuild ? buildTime : null });
+            }
+
+        } catch (error) {
+            if (headerLevel > 0) {
+                dv.header(headerLevel, "⚠️ Cache Preparation Error");
+            }
+            dv.paragraph("**Something went wrong during cache preparation.**");
+            dv.paragraph(`Error: ${error.message}`);
+            console.error("[CACHE PREP] Error during cache preparation:", error);
+        }
+    }
+
+    /**
+     * Helper method to render timestamp information
+     */
+    _renderTimestamp({ dv, label = 'Rendered at', durationMs = null }) {
+        const now = new Date();
+        const timeString = now.toLocaleString('en-US', {
+            year: 'numeric',
+            month: '2-digit', 
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        
+        const durationText = durationMs !== null ? ` (build: ${durationMs}ms, settle: 265ms)` : '';
+        dv.paragraph(`**${label}: ${timeString}${durationText}**`);
+    }
+
+    /**
+     * Helper method to get current time in milliseconds  
+     */
+    _getNowMs() {
+        return performance.now();
     }
 } 
 
