@@ -778,8 +778,12 @@ class ConceptManager {
             }
         }
     
-        // Process each frontmatter field criteria
+        // Initialize stepCounter for debugging (needed even with sections disabled)
         let stepCounter = strictPath ? 1 : 3; // Step numbering starts at 3 if we already did path scoring
+    
+        // *** SECTION 2: Process each frontmatter field criteria (DISABLED FOR DEBUGGING) ***
+        /*
+        // let stepCounter = strictPath ? 1 : 3; // Step numbering starts at 3 if we already did path scoring
         
         Object.keys(resolvedCriteria).forEach(field => {
             const targetValue = resolvedCriteria[field];
@@ -894,7 +898,10 @@ class ConceptManager {
             }
             stepCounter++;
         });
+        */
         
+        // *** SECTION 3: REVERSE RELATIONSHIP LOOKUP (DISABLED FOR DEBUGGING) ***
+        /*
         // REVERSE RELATIONSHIP LOOKUP: Find pages that reference the current page
         if (current['domain-category']) {
             const domainCategories = Array.isArray(current['domain-category']) ? current['domain-category'] : [current['domain-category']];
@@ -991,7 +998,10 @@ class ConceptManager {
             
             stepCounter++;
         }
+        */
         
+        // *** SECTION 4: FORWARD RELATIONSHIP LOOKUP (DISABLED FOR DEBUGGING) ***
+        /*
         // FORWARD RELATIONSHIP LOOKUP: Award points when the CURRENT page references candidates by name
         // Example: On a Film page, "group-film-director: John Waters" or "group-film-actor: John Waters"
         // should give points to the Person page(s) whose domain-category includes "film-director" or "film-actor" respectively.
@@ -1086,6 +1096,7 @@ class ConceptManager {
                 stepCounter++;
             }
         }
+        */
         
         // Calculate final scores
         if (debug) {
@@ -1106,6 +1117,7 @@ class ConceptManager {
             // Calculate max possible score based on criteria
             let maxPossibleScore = strictPath ? 0 : pathDistanceMultiplier; // Max path score equals potential same-folder points
             
+            /* DISABLED: Frontmatter field scoring
             Object.keys(resolvedCriteria).forEach(field => {
                 const targetValue = resolvedCriteria[field];
                 if (targetValue) {
@@ -1113,7 +1125,9 @@ class ConceptManager {
                     maxPossibleScore += targetValues.length * scoreMultiplier; // points per matching value
                 }
             });
+            */
             
+            /* DISABLED: Reverse relationship points
             // Add potential reverse relationship points
             if (current['domain-category']) {
                 const domainCategories = Array.isArray(current['domain-category']) ? current['domain-category'] : [current['domain-category']];
@@ -1128,7 +1142,9 @@ class ConceptManager {
                     }
                 });
             }
+            */
 
+            /* DISABLED: Forward relationship points
             // Add potential forward relationship points (one per valid group-* field on current page)
             const currentGroupFieldsForMax = Object.keys(current).filter(k => k.startsWith('group-') && current[k]);
             currentGroupFieldsForMax.forEach(groupFieldName => {
@@ -1140,6 +1156,7 @@ class ConceptManager {
                     maxPossibleScore += forwardScoreMultiplier;
                 }
             });
+            */
             
             const confidence = maxPossibleScore > 0 ? (totalScore / maxPossibleScore) * 100 : 0;
             
@@ -3762,11 +3779,11 @@ class ConceptManager {
         // Note: All queries inside getRelatedConcepts are gated by valid subjects/domains and path
         // We also avoid repeated queries by caching config and building indexes where helpful.
 
-            if (debug) {
-                dv.paragraph(`**Step 4: Finding related concepts**`);
+            // Always show debug info for A-B testing
+            dv.paragraph(`**LEGACY DEBUG: Step 4: Finding related concepts**`);
             dv.paragraph(`Using getRelatedConcepts with relationTypes: [${(relationTypes || []).join(', ')}]`);
             dv.paragraph(`Subject filter: ${subjectsToUse.join(', ')}`);
-            }
+            dv.paragraph(`Current page: ${currentPage.file.name}`);
             
             // Build match criteria from current page's group-* fields and domain-category
             const matchCriteria = {};
@@ -3783,31 +3800,43 @@ class ConceptManager {
                 }
             });
             
-            if (debug) {
-                dv.paragraph(`**Building Match Criteria for getRelatedConcepts:**`);
-                dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? 'included' : 'not present'}`);
-                dv.paragraph(`  • group-* fields from current page:`);
+            // Always show debug info for A-B testing
+            dv.paragraph(`**LEGACY: Building Match Criteria for getRelatedConcepts:**`);
+            dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? 'included' : 'not present'}`);
+            dv.paragraph(`  • group-* fields from current page:`);
             (relationTypes || []).forEach(type => {
-                    const groupFieldName = `group-${type}`;
-                    const values = currentPage[groupFieldName];
-                    dv.paragraph(`    - ${groupFieldName}: ${values ? `"${Array.isArray(values) ? values.join(', ') : values}"` : 'not present'}`);
-                });
-                dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
-            }
+                const groupFieldName = `group-${type}`;
+                const values = currentPage[groupFieldName];
+                dv.paragraph(`    - ${groupFieldName}: ${values ? `"${Array.isArray(values) ? values.join(', ') : values}"` : 'not present'}`);
+            });
+            dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
             
-            const related = this.getRelatedConcepts({ dv, matchCriteria, debug });
+            // Show current page details
+            dv.paragraph(`**LEGACY: Current Page Details:**`);
+            dv.paragraph(`  • subject: ${currentPage.subject}`);
+            dv.paragraph(`  • domain: ${currentPage.domain}`);
+            dv.paragraph(`  • type: ${currentPage.type}`);
+            dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? (Array.isArray(currentPage["domain-category"]) ? currentPage["domain-category"].join(', ') : currentPage["domain-category"]) : 'none'}`);
+            dv.paragraph("---");
+            
+            const related = this.getRelatedConcepts({ dv, matchCriteria, debug: true });
 
             const filteredResults = related
                 .filter(r => r.concept.file.path !== currentPage.file.path)
             .filter(r => subjectsToUse.includes(r.concept.subject))
                 .sort((a, b) => b.confidence - a.confidence);
 
-            if (debug) {
-                dv.paragraph(`**Related "CONCEPTS" found: ${related.length}**`);
-                dv.paragraph(`**After filtering by subject: ${filteredResults.length}**`);
-            dv.paragraph(`**Valid subjects: [${subjectsToUse.join(', ')}]**`);
-                dv.paragraph("---");
+            // Always show debug info for A-B testing
+            dv.paragraph(`**LEGACY: Related "CONCEPTS" found: ${related.length}**`);
+            dv.paragraph(`**LEGACY: After filtering by subject: ${filteredResults.length}**`);
+            dv.paragraph(`**LEGACY: Valid subjects: [${subjectsToUse.join(', ')}]**`);
+            if (filteredResults.length > 0) {
+                dv.paragraph(`**LEGACY: First 5 results:**`);
+                filteredResults.slice(0, 5).forEach(r => {
+                    dv.paragraph(`  • ${r.concept.file.name} (${r.concept.subject}, ${r.concept.domain}, ${r.concept.type}) - ${r.confidence.toFixed(1)}%`);
+                });
             }
+            dv.paragraph("---");
 
             // Display related concepts section
         dv.header(headerLevel, "Related Content");
@@ -3861,8 +3890,24 @@ class ConceptManager {
         
         console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
 
-        // Default validSubjects to current subject if not provided
-        const subjectsToUse = (validSubjects && validSubjects.length > 0) ? validSubjects : [currentSubject];
+        // *** CRITICAL: Get config to get proper subject filtering like legacy version ***
+        const config = this.getConfigForSubject({ 
+            dv, 
+            subject: currentSubject, 
+            debug: false 
+        });
+
+        // Use valid subjects from config, falling back to parameter, then current subject
+        let subjectsToUse;
+        if (validSubjects && validSubjects.length > 0) {
+            subjectsToUse = validSubjects;
+        } else if (config.validSubjects && config.validSubjects.length > 0) {
+            subjectsToUse = config.validSubjects;
+        } else {
+            subjectsToUse = [currentSubject];
+        }
+        
+        console.log(`[SIC] 🔧 Subject filtering: parameter=[${(validSubjects || []).join(', ')}], config=[${(config.validSubjects || []).join(', ')}], final=[${subjectsToUse.join(', ')}]`);
 
         // Build match criteria from current page's group-* fields and domain-category
         const matchCriteria = {};
@@ -3875,69 +3920,143 @@ class ConceptManager {
             const groupFieldName = `group-${type}`;
             const values = currentPage[groupFieldName];
             if (values) {
-                matchCriteria[groupFieldName] = true;
+                // *** CRITICAL: Validate group field like legacy version ***
+                const validation = this.isValidGroupField({ 
+                    groupFieldName: groupFieldName, 
+                    validFilters: config.validFilters
+                });
+                if (validation.isValid) {
+                    matchCriteria[groupFieldName] = true;
+                } else {
+                    console.log(`[SIC] ⚠️ Skipping invalid group field: ${validation.reason}`);
+                }
             }
         });
 
         console.log(`[SIC] 🔍 Match criteria: ${Object.keys(matchCriteria).join(', ')}`);
 
+        // Always show debug info for A-B testing
+        dv.paragraph(`**CACHED: Config Lookup for Subject: "${currentSubject}"**`);
+        if (config.hasConfig) {
+            dv.paragraph(`✅ Found Config: ${config.debugInfo.configPageName}`);
+            dv.paragraph(`  • valid_filters: [${config.validFilters.join(', ')}]`);
+            dv.paragraph(`  • valid_subjects: [${config.validSubjects.join(', ')}]`);
+            dv.paragraph(`  • valid_domains: [${config.validDomains.join(', ')}]`);
+        } else {
+            dv.paragraph(`❌ No Config page found for subject "${currentSubject}"`);
+            dv.paragraph(`  • Using default valid_subjects: [${config.validSubjects.join(', ')}]`);
+        }
+        dv.paragraph("---");
+        
+        // *** SECTION 1: Path distance scoring parameters (same as legacy) ***
+        const pathDistanceMultiplier = 3.0; // Same as legacy
+        const maxPathDistance = 5; // Same as legacy
+        
+        dv.paragraph(`**CACHED DEBUG: Section 1 - Path Distance Scoring**`);
+        dv.paragraph(`  • Algorithm: Same as legacy - filesystem proximity scoring`);
+        dv.paragraph(`  • Path distance multiplier: ${pathDistanceMultiplier}`);
+        dv.paragraph(`  • Max path distance: ${maxPathDistance} jumps`);
+        dv.paragraph(`  • Current page: ${currentPage.file.path}`);
+        dv.paragraph(`  • Formula: distance=0 → ${pathDistanceMultiplier} pts (100%); distance>0 → ${pathDistanceMultiplier}/(1+distance) pts`);
+        
+        // Show current page details
+        dv.paragraph(`**CACHED: Current Page Details:**`);
+        dv.paragraph(`  • subject: ${currentPage.subject}`);
+        dv.paragraph(`  • domain: ${currentPage.domain}`);
+        dv.paragraph(`  • type: ${currentPage.type}`);
+        dv.paragraph(`  • path: ${currentPage.file.path}`);
+        dv.paragraph("---");
+
         // *** CRITICAL: Implement getRelatedConcepts logic using cached data (no vault queries) ***
         const related = [];
         
-        // Filter eligible pages from cache (exclude current page, filter by valid subjects)
+        // Filter eligible pages from cache (exclude current page, filter by valid subjects AND domains like legacy)
         const eligiblePages = cachedPages.filter(cachedPage => {
             const page = cachedPage._page;
             if (page.file?.path === currentPage.file.path) return false; // exclude current page
             if (!subjectsToUse.includes(page.subject)) return false; // filter by valid subjects
+            
+            // *** CRITICAL: Add domain filtering like legacy version ***
+            if (config.validDomains && config.validDomains.length > 0) {
+                if (!config.validDomains.includes(page.domain)) return false; // filter by valid domains
+            }
+            
             return true;
         });
 
         console.log(`[SIC] 🔍 Found ${eligiblePages.length} eligible pages for related content`);
+        
+        // Always show debug info for A-B testing
+        dv.paragraph(`**CACHED: Found ${eligiblePages.length} eligible pages for related content**`);
+        dv.paragraph(`**CACHED: Subject filter: [${subjectsToUse.join(', ')}]**`);
+        dv.paragraph(`**CACHED: Domain filter: [${(config.validDomains || []).join(', ')}]**`);
+        if (eligiblePages.length > 0) {
+            dv.paragraph(`**CACHED: First 10 eligible pages:**`);
+            eligiblePages.slice(0, 10).forEach(cachedPage => {
+                const page = cachedPage._page;
+                dv.paragraph(`  • ${page.file.name} (${page.subject}, ${page.domain}, ${page.type})`);
+            });
+        }
+        dv.paragraph("---");
 
-        // For each eligible page, calculate confidence based on shared values
+        // *** SECTION 1: Path distance scoring (ENABLED) - Using cached data ***
+        // For each eligible page, calculate path distance and apply same scoring as legacy
+        eligiblePages.forEach(cachedPage => {
+            const page = cachedPage._page;
+            
+            // Calculate path distance between current page and this page
+            const distance = this.calculatePathDistance(currentPage.file.path, page.file.path);
+            
+            // Only include pages within max distance threshold (like legacy)
+            if (distance <= maxPathDistance) {
+                // Apply same distance-based scoring formula as legacy
+                const pathScore = distance === 0 ? 
+                    pathDistanceMultiplier : 
+                    pathDistanceMultiplier / (1 + distance);
+                
+                // Calculate confidence as percentage (same as legacy)
+                const confidence = (pathScore / pathDistanceMultiplier) * 100;
+                
+                related.push({
+                    concept: page,
+                    confidence: confidence,
+                    pathDistance: distance,
+                    pathScore: pathScore
+                });
+                
+                // Debug logging for distance calculation
+                console.log(`[SIC] 📏 Path distance: ${page.file.name} - distance=${distance}, score=${pathScore.toFixed(2)}, confidence=${confidence.toFixed(1)}%`);
+            }
+        });
+
+        // *** SECTION 2: Domain-category matching (DISABLED FOR DEBUGGING) ***
+        /*
         eligiblePages.forEach(cachedPage => {
             const page = cachedPage._page;
             let confidence = 0;
             let matchedFields = 0;
 
-            // Check domain-category matching
             if (matchCriteria["domain-category"] && currentPage["domain-category"] && page["domain-category"]) {
                 const currentDomainCats = this.normalizeValues(currentPage["domain-category"]);
                 const pageDomainCats = this.normalizeValues(page["domain-category"]);
                 const intersection = currentDomainCats.filter(cat => pageDomainCats.includes(cat));
                 if (intersection.length > 0) {
-                    confidence += (intersection.length / Math.max(currentDomainCats.length, pageDomainCats.length)) * 100;
+                    const fieldConfidence = (intersection.length / Math.max(currentDomainCats.length, pageDomainCats.length)) * 100;
+                    confidence += fieldConfidence;
                     matchedFields++;
                 }
             }
-
-            // Check group-* field matching
-            Object.keys(matchCriteria).forEach(fieldName => {
-                if (fieldName === "domain-category") return; // already handled above
-                
-                const currentValues = this.normalizeValues(currentPage[fieldName] || []);
-                const pageValues = this.normalizeValues(page[fieldName] || []);
-                
-                if (currentValues.length > 0 && pageValues.length > 0) {
-                    const intersection = currentValues.filter(val => 
-                        pageValues.some(pVal => String(val).toLowerCase() === String(pVal).toLowerCase())
-                    );
-                    if (intersection.length > 0) {
-                        confidence += (intersection.length / Math.max(currentValues.length, pageValues.length)) * 100;
-                        matchedFields++;
-                    }
-                }
-            });
 
             // Only include if there's at least one match
             if (matchedFields > 0) {
                 related.push({
                     concept: page,
-                    confidence: confidence / matchedFields, // average confidence across matched fields
+                    confidence: confidence / matchedFields,
                     matchedFields
                 });
             }
         });
+        */
 
         const filteredResults = related
             .filter(r => r.concept.file.path !== currentPage.file.path)
@@ -3945,6 +4064,37 @@ class ConceptManager {
             .sort((a, b) => b.confidence - a.confidence);
 
         console.log(`[SIC] 📊 Found ${related.length} related concepts, ${filteredResults.length} after filtering`);
+        
+        // Always show debug info for A-B testing
+        dv.paragraph(`**CACHED: Found ${related.length} related concepts, ${filteredResults.length} after filtering**`);
+        if (filteredResults.length > 0) {
+            dv.paragraph(`**CACHED: First 5 results:**`);
+            filteredResults.slice(0, 5).forEach(r => {
+                dv.paragraph(`  • ${r.concept.file.name} (${r.concept.subject}, ${r.concept.domain}, ${r.concept.type}) - ${r.confidence.toFixed(1)}% (distance: ${r.pathDistance} jumps, score: ${r.pathScore.toFixed(2)})`);
+            });
+        }
+        
+        // Show distance breakdown like legacy
+        if (related.length > 0) {
+            dv.paragraph(`**CACHED: Distance breakdown:**`);
+            const distanceGroups = {};
+            related.forEach(r => {
+                if (!distanceGroups[r.pathDistance]) distanceGroups[r.pathDistance] = [];
+                distanceGroups[r.pathDistance].push(r.concept.file.name);
+            });
+            
+            Object.keys(distanceGroups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(distance => {
+                const files = distanceGroups[distance];
+                const score = distance === '0' ? pathDistanceMultiplier : (pathDistanceMultiplier / (1 + parseInt(distance))).toFixed(2);
+                dv.paragraph(`  • Distance ${distance} jumps (${score} pts): ${files.length} files`);
+                if (files.length <= 5) {
+                    dv.list(files);
+                } else {
+                    dv.list(files.slice(0, 5).concat([`... and ${files.length - 5} more`]));
+                }
+            });
+        }
+        dv.paragraph("---");
 
         // Display related concepts section
         dv.header(headerLevel, "Related Content");
@@ -4554,11 +4704,20 @@ class ConceptManager {
             const __methodEnd = this._getNowMs();
             const buildTime = Math.round(__methodEnd - __buildStart);
             
-            // Report whether cache was built fresh or reused
+            // Get cache stats to determine what happened
+            const cacheStats = SubjectIndexCache.getStats();
+            const cacheAge = cacheStats.lastBuildTimestamp ? 
+                (Date.now() - cacheStats.lastBuildTimestamp) / 1000 / 60 : null;
+            
+            // Report cache status
             if (cacheBuildTime > 50) {
-                console.log(`[CACHE PREP] ✅ Cache built FRESH in ${cacheBuildTime}ms (${cachedPages.length} pages) - Total method time: ${buildTime}ms`);
+                if (cacheAge && cacheAge >= 5) {
+                    console.log(`[CACHE PREP] ✅ Cache was STALE (${cacheAge.toFixed(1)}min old) - rebuilt in ${cacheBuildTime}ms (${cachedPages.length} pages)`);
+                } else {
+                    console.log(`[CACHE PREP] ✅ Cache built FRESH in ${cacheBuildTime}ms (${cachedPages.length} pages) - Total method time: ${buildTime}ms`);
+                }
             } else {
-                console.log(`[CACHE PREP] ✅ Cache REUSED existing in ${cacheBuildTime}ms (${cachedPages.length} pages) - Total method time: ${buildTime}ms`);
+                console.log(`[CACHE PREP] ✅ Cache REUSED existing in ${cacheBuildTime}ms (${cachedPages.length} pages, age: ${cacheAge ? cacheAge.toFixed(1) + 'min' : 'unknown'}) - Total method time: ${buildTime}ms`);
             }
 
             if (showTimestamp) {
