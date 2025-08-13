@@ -780,11 +780,8 @@ class ConceptManager {
     
         // Initialize stepCounter for debugging (needed even with sections disabled)
         let stepCounter = strictPath ? 1 : 3; // Step numbering starts at 3 if we already did path scoring
-    
-        // *** SECTION 2: Process each frontmatter field criteria (DISABLED FOR DEBUGGING) ***
-        /*
-        // let stepCounter = strictPath ? 1 : 3; // Step numbering starts at 3 if we already did path scoring
         
+        // *** SECTION 2: Process each frontmatter field criteria (ENABLED) ***
         Object.keys(resolvedCriteria).forEach(field => {
             const targetValue = resolvedCriteria[field];
             
@@ -898,10 +895,8 @@ class ConceptManager {
             }
             stepCounter++;
         });
-        */
         
-        // *** SECTION 3: REVERSE RELATIONSHIP LOOKUP (DISABLED FOR DEBUGGING) ***
-        /*
+        // *** SECTION 3: REVERSE RELATIONSHIP LOOKUP (ENABLED) ***
         // REVERSE RELATIONSHIP LOOKUP: Find pages that reference the current page
         if (current['domain-category']) {
             const domainCategories = Array.isArray(current['domain-category']) ? current['domain-category'] : [current['domain-category']];
@@ -998,7 +993,6 @@ class ConceptManager {
             
             stepCounter++;
         }
-        */
         
         // *** SECTION 4: FORWARD RELATIONSHIP LOOKUP (DISABLED FOR DEBUGGING) ***
         /*
@@ -3802,14 +3796,14 @@ class ConceptManager {
             
             // Always show debug info for A-B testing
             dv.paragraph(`**LEGACY: Building Match Criteria for getRelatedConcepts:**`);
-            dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? 'included' : 'not present'}`);
-            dv.paragraph(`  • group-* fields from current page:`);
+                dv.paragraph(`  • domain-category: ${currentPage["domain-category"] ? 'included' : 'not present'}`);
+                dv.paragraph(`  • group-* fields from current page:`);
             (relationTypes || []).forEach(type => {
-                const groupFieldName = `group-${type}`;
-                const values = currentPage[groupFieldName];
-                dv.paragraph(`    - ${groupFieldName}: ${values ? `"${Array.isArray(values) ? values.join(', ') : values}"` : 'not present'}`);
-            });
-            dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
+                    const groupFieldName = `group-${type}`;
+                    const values = currentPage[groupFieldName];
+                    dv.paragraph(`    - ${groupFieldName}: ${values ? `"${Array.isArray(values) ? values.join(', ') : values}"` : 'not present'}`);
+                });
+                dv.paragraph(`  • Final match criteria: ${Object.keys(matchCriteria).map(k => `${k}=true`).join(', ')}`);
             
             // Show current page details
             dv.paragraph(`**LEGACY: Current Page Details:**`);
@@ -3926,7 +3920,7 @@ class ConceptManager {
                     validFilters: config.validFilters
                 });
                 if (validation.isValid) {
-                    matchCriteria[groupFieldName] = true;
+                matchCriteria[groupFieldName] = true;
                 } else {
                     console.log(`[SIC] ⚠️ Skipping invalid group field: ${validation.reason}`);
                 }
@@ -3985,7 +3979,7 @@ class ConceptManager {
         });
 
         console.log(`[SIC] 🔍 Found ${eligiblePages.length} eligible pages for related content`);
-        
+
         // Always show debug info for A-B testing
         dv.paragraph(`**CACHED: Found ${eligiblePages.length} eligible pages for related content**`);
         dv.paragraph(`**CACHED: Subject filter: [${subjectsToUse.join(', ')}]**`);
@@ -4021,7 +4015,8 @@ class ConceptManager {
                     concept: page,
                     confidence: confidence,
                     pathDistance: distance,
-                    pathScore: pathScore
+                    pathScore: pathScore,
+                    fieldScores: new Map() // Initialize field scores map
                 });
                 
                 // Debug logging for distance calculation
@@ -4029,48 +4024,338 @@ class ConceptManager {
             }
         });
 
-        // *** SECTION 2: Domain-category matching (DISABLED FOR DEBUGGING) ***
-        /*
-        eligiblePages.forEach(cachedPage => {
-            const page = cachedPage._page;
-            let confidence = 0;
-            let matchedFields = 0;
-
-            if (matchCriteria["domain-category"] && currentPage["domain-category"] && page["domain-category"]) {
-                const currentDomainCats = this.normalizeValues(currentPage["domain-category"]);
-                const pageDomainCats = this.normalizeValues(page["domain-category"]);
-                const intersection = currentDomainCats.filter(cat => pageDomainCats.includes(cat));
-                if (intersection.length > 0) {
-                    const fieldConfidence = (intersection.length / Math.max(currentDomainCats.length, pageDomainCats.length)) * 100;
-                    confidence += fieldConfidence;
-                    matchedFields++;
-                }
-            }
-
-            // Only include if there's at least one match
-            if (matchedFields > 0) {
-                related.push({
-                    concept: page,
-                    confidence: confidence / matchedFields,
-                    matchedFields
-                });
+        // *** SECTION 2: Process frontmatter field criteria (ENABLED) - Same logic as legacy ***
+        const scoreMultiplier = 1.5; // Same as legacy
+        let stepCounter = 3; // Continue from path scoring step
+        
+        // Build resolved criteria like legacy (this should already be done but let's be explicit)
+        const resolvedCriteria = {};
+        Object.keys(matchCriteria).forEach(field => {
+            if (matchCriteria[field] === true) {
+                resolvedCriteria[field] = currentPage[field];
             }
         });
-        */
+
+        // Show resolved criteria debug info (same as legacy)
+        dv.paragraph(`**CACHED: Section 2 - Frontmatter Field Matching**`);
+        dv.paragraph(`  • Score multiplier: ${scoreMultiplier} points per match`);
+        dv.paragraph(`  • Final resolved criteria (after validation):`);
+        Object.keys(resolvedCriteria).forEach(field => {
+            const value = resolvedCriteria[field];
+            const displayValue = Array.isArray(value) ? value.join(', ') : (value || 'undefined');
+            dv.paragraph(`    - ${field}: ${displayValue}`);
+        });
+        dv.paragraph("---");
+
+        // Process each frontmatter field criteria (same as legacy)
+        Object.keys(resolvedCriteria).forEach(field => {
+            const targetValue = resolvedCriteria[field];
+            
+            if (!targetValue) {
+                dv.paragraph(`**CACHED Step ${stepCounter}: Checking frontmatter field '${field}'**`);
+                dv.paragraph(`❌ Target value is null/undefined for '${field}' - skipping`);
+                console.log(`[SIC] ⚠️ Step ${stepCounter}: Target value is null/undefined for '${field}' - skipping`);
+                stepCounter++;
+                return;
+            }
+
+            const targetValues = Array.isArray(targetValue) ? targetValue : [targetValue];
+            
+            dv.paragraph(`**CACHED Step ${stepCounter}: Checking frontmatter field '${field}'**`);
+            dv.paragraph(`  • Target value(s): [${targetValues.join(', ')}]`);
+            dv.paragraph(`  • Subject filter: [${subjectsToUse.join(', ')}]`);
+            dv.paragraph(`  • Domain filter: [${(config.validDomains || []).join(', ')}]`);
+            dv.paragraph(`  • Query: Find cached pages where ${field} contains ANY of [${targetValues.join(', ')}] AND subject in valid_subjects`);
+            
+            console.log(`[SIC] 🔍 Step ${stepCounter}: Checking frontmatter field '${field}'`);
+            console.log(`[SIC]   • Target value(s): [${targetValues.join(', ')}]`);
+            console.log(`[SIC]   • Subject filter: [${subjectsToUse.join(', ')}]`);
+            console.log(`[SIC]   • Domain filter: [${(config.validDomains || []).join(', ')}]`);
+            
+            // Find matching pages from cache (equivalent to legacy's dv.pages() query)
+            let matchCount = 0;
+            eligiblePages.forEach(cachedPage => {
+                const page = cachedPage._page;
+                
+                // Check if this field matches (same logic as legacy)
+                const pageValue = page[field];
+                if (!pageValue) return;
+                
+                const pageValues = Array.isArray(pageValue) ? pageValue : [pageValue];
+                // Check if any of the target values match any of the page values
+                const hasMatch = targetValues.some(tv => pageValues.includes(tv));
+                
+                if (hasMatch) {
+                    const conceptId = page.file.path;
+                    
+                    // Find existing entry in related array (from Section 1 path scoring)
+                    let existingEntry = related.find(r => r.concept.file.path === conceptId);
+                    if (!existingEntry) {
+                        // This page wasn't included in path scoring, so create new entry with 0 path score
+                        existingEntry = {
+                            concept: page,
+                            confidence: 0,
+                            pathDistance: 999, // No path proximity
+                            pathScore: 0,
+                            fieldScores: new Map()
+                        };
+                        related.push(existingEntry);
+                        console.log(`[SIC]     → NEW ENTRY: ${page.file.name} (not in path scoring)`);
+                    }
+                    
+                    // Award points for matches (same as legacy)
+                    const matchingValues = targetValues.filter(v => pageValues.includes(v));
+                    const fieldScore = matchingValues.length * scoreMultiplier;
+                    existingEntry.fieldScores.set(field, fieldScore);
+                    
+                    matchCount++;
+                    console.log(`[SIC]     → ${page.file.name}: ${matchingValues.length} matching values (${matchingValues.join(', ')}) = ${fieldScore} points`);
+                }
+            });
+            
+            dv.paragraph(`**CACHED QUERY RESULTS:**`);
+            dv.paragraph(`  • Found ${matchCount} cached pages matching '${field}' criteria`);
+            if (matchCount > 0 && matchCount <= 10) {
+                dv.paragraph(`  • Matching pages:`);
+                eligiblePages.forEach(cachedPage => {
+                    const page = cachedPage._page;
+                    const pageValue = page[field];
+                    if (!pageValue) return;
+                    
+                    const pageValues = Array.isArray(pageValue) ? pageValue : [pageValue];
+                    const hasMatch = targetValues.some(tv => pageValues.includes(tv));
+                    if (hasMatch) {
+                        const matchingValues = targetValues.filter(v => pageValues.includes(v));
+                        dv.paragraph(`    - ${page.file.name}: ${field}=[${pageValues.join(', ')}] (matches: [${matchingValues.join(', ')}])`);
+                    }
+                });
+            } else if (matchCount > 10) {
+                dv.paragraph(`  • Too many matches to list (${matchCount} pages)`);
+            }
+            dv.paragraph("---");
+            
+            console.log(`[SIC]   • Found ${matchCount} pages matching '${field}' criteria`);
+            stepCounter++;
+        });
+
+        // *** SECTION 3: REVERSE RELATIONSHIP LOOKUP (ENABLED) - Same logic as legacy ***
+        const reverseScoreMultiplier = 3.0; // Same as legacy
+        
+        if (currentPage['domain-category']) {
+            const domainCategories = Array.isArray(currentPage['domain-category']) ? currentPage['domain-category'] : [currentPage['domain-category']];
+            const currentPageName = currentPage.file.name;
+            
+            dv.paragraph(`**CACHED Step ${stepCounter}: Reverse relationship lookup**`);
+            dv.paragraph(`  • Current page name: "${currentPageName}"`);
+            dv.paragraph(`  • Domain categories: [${domainCategories.join(', ')}]`);
+            dv.paragraph(`  • Score per reverse reference: ${reverseScoreMultiplier} points`);
+            dv.paragraph("---");
+            
+            console.log(`[SIC] 🔄 Step ${stepCounter}: Reverse relationship lookup`);
+            console.log(`[SIC]   • Current page name: "${currentPageName}"`);
+            console.log(`[SIC]   • Domain categories: [${domainCategories.join(', ')}]`);
+            
+            domainCategories.forEach(category => {
+                const groupFieldName = `group-${category}`;
+                
+                // Validate that this group field is in config (same as legacy)
+                const validation = this.isValidGroupField({ 
+                    groupFieldName: groupFieldName, 
+                    validFilters: config.validFilters
+                });
+                
+                if (!validation.isValid) {
+                    dv.paragraph(`⚠️ Skipping reverse lookup for invalid group field: ${validation.reason}`);
+                    console.log(`[SIC] ⚠️ Skipping reverse lookup for invalid group field: ${validation.reason}`);
+                    return;
+                }
+                
+                dv.paragraph(`**CACHED REVERSE LOOKUP QUERY:**`);
+                dv.paragraph(`  • Looking for cached pages with field: "${groupFieldName}"`);
+                dv.paragraph(`  • That contain value: "${currentPageName}"`);
+                dv.paragraph(`  • Subject filter: [${subjectsToUse.join(', ')}]`);
+                
+                console.log(`[SIC]   🔍 Looking for pages with field: "${groupFieldName}"`);
+                console.log(`[SIC]   🔍 That contain value: "${currentPageName}"`);
+                
+                // Find pages that reference the current page in this group field (using cached data)
+                let reverseMatchCount = 0;
+                eligiblePages.forEach(cachedPage => {
+                    const page = cachedPage._page;
+                    
+                    // Check if this page has the group field
+                    if (!page[groupFieldName]) return;
+                    
+                    // Check if the field contains the current page name (same logic as legacy)
+                    const fieldValue = page[groupFieldName];
+                    let containsCurrentPage = false;
+                    
+                    if (Array.isArray(fieldValue)) {
+                        containsCurrentPage = fieldValue.some(val => val && val.toString().includes(currentPageName));
+                    } else {
+                        containsCurrentPage = fieldValue && fieldValue.toString().includes(currentPageName);
+                    }
+                    
+                    if (containsCurrentPage) {
+                        const conceptId = page.file.path;
+                        
+                        // Find existing entry in related array
+                        let existingEntry = related.find(r => r.concept.file.path === conceptId);
+                        if (!existingEntry) {
+                            // This page wasn't included in previous sections, so create new entry
+                            existingEntry = {
+                    concept: page,
+                                confidence: 0,
+                                pathDistance: 999, // No path proximity
+                                pathScore: 0,
+                                fieldScores: new Map()
+                            };
+                            related.push(existingEntry);
+                            console.log(`[SIC]     → NEW ENTRY: ${page.file.name} (reverse reference only)`);
+                        }
+                        
+                        // Award points for reverse relationships (same as legacy)
+                        const points = reverseScoreMultiplier;
+                        existingEntry.fieldScores.set(`${groupFieldName}-reverse`, points);
+                        
+                        reverseMatchCount++;
+                        console.log(`[SIC]     → ${page.file.name}: ${groupFieldName}=[${Array.isArray(fieldValue) ? fieldValue.join(', ') : fieldValue}] (contains: ${currentPageName}) = ${points} points`);
+                    }
+                });
+                
+                dv.paragraph(`**CACHED REVERSE LOOKUP RESULTS:**`);
+                dv.paragraph(`  • Found ${reverseMatchCount} cached pages with reverse references`);
+                if (reverseMatchCount > 0) {
+                    dv.paragraph(`  • Each gets ${reverseScoreMultiplier} points for containing "${currentPageName}" in ${groupFieldName}`);
+                }
+                dv.paragraph("---");
+                
+                console.log(`[SIC]   • Found ${reverseMatchCount} pages with reverse references`);
+            });
+            
+            stepCounter++;
+        }
+
+        // *** CALCULATE FINAL SCORES (same logic as legacy) ***
+        dv.paragraph(`**CACHED Step ${stepCounter}: Calculating final scores**`);
+        dv.paragraph(`  • Total concepts found: ${related.length}`);
+        dv.paragraph(`  • Score formula: (pathScore + fieldScores) / maxPossibleScore * 100`);
+        dv.paragraph(`  • Max possible path score: ${pathDistanceMultiplier}`);
+        
+        // Show max possible score breakdown for transparency
+        let totalMaxPossible = pathDistanceMultiplier;
+        dv.paragraph(`  • Max possible field scores:`);
+        Object.keys(resolvedCriteria).forEach(field => {
+            const targetValue = resolvedCriteria[field];
+            if (targetValue) {
+                const targetValues = Array.isArray(targetValue) ? targetValue : [targetValue];
+                const fieldMax = targetValues.length * scoreMultiplier;
+                totalMaxPossible += fieldMax;
+                dv.paragraph(`    - ${field}: ${targetValues.length} values × ${scoreMultiplier} = ${fieldMax} pts`);
+            }
+        });
+        
+        // Add potential reverse relationship points (same as legacy)
+        if (currentPage['domain-category']) {
+            const domainCategories = Array.isArray(currentPage['domain-category']) ? currentPage['domain-category'] : [currentPage['domain-category']];
+            dv.paragraph(`  • Max possible reverse relationship scores:`);
+            domainCategories.forEach(category => {
+                const groupFieldName = `group-${category}`;
+                const validation = this.isValidGroupField({ 
+                    groupFieldName: groupFieldName, 
+                    validFilters: config.validFilters
+                });
+                if (validation.isValid) {
+                    totalMaxPossible += reverseScoreMultiplier;
+                    dv.paragraph(`    - ${groupFieldName}-reverse: ${reverseScoreMultiplier} pts`);
+                }
+            });
+        }
+        
+        dv.paragraph(`  • **Total max possible score: ${totalMaxPossible} pts**`);
+        dv.paragraph(`  • (Legacy bug: uses only ${pathDistanceMultiplier} as denominator, causing >100% scores)`);
+        dv.paragraph("---");
+        
+        console.log(`[SIC] 🧮 Step ${stepCounter}: Calculating final scores`);
+        console.log(`[SIC]   • Total concepts found: ${related.length}`);
+        
+        // Calculate confidence for each concept (same as legacy)
+        related.forEach(entry => {
+            const pathScore = entry.pathScore || 0;
+            
+            // Sum all frontmatter field scores
+            const frontmatterScores = Array.from(entry.fieldScores?.values() || []).reduce((sum, score) => sum + score, 0);
+            
+            const totalScore = pathScore + frontmatterScores;
+            
+            // Calculate max possible score (same as legacy logic) - use the totalMaxPossible we calculated above
+            let maxPossibleScore = totalMaxPossible;
+            
+            // Calculate confidence as percentage (same as legacy)
+            entry.confidence = maxPossibleScore > 0 ? (totalScore / maxPossibleScore) * 100 : 0;
+            
+            console.log(`[SIC]     → ${entry.concept.file.name}: path=${pathScore.toFixed(2)}, fields=${frontmatterScores.toFixed(2)}, total=${totalScore.toFixed(2)}/${maxPossibleScore.toFixed(2)} = ${entry.confidence.toFixed(1)}%`);
+        });
 
         const filteredResults = related
             .filter(r => r.concept.file.path !== currentPage.file.path)
             .filter(r => subjectsToUse.includes(r.concept.subject))
-            .sort((a, b) => b.confidence - a.confidence);
+            .sort((a, b) => {
+                // Primary sort: confidence (descending)
+                if (b.confidence !== a.confidence) {
+                    return b.confidence - a.confidence;
+                }
+                
+                // Secondary sort for ties: path distance (ascending - closer paths first)
+                if (a.pathDistance !== b.pathDistance) {
+                    return a.pathDistance - b.pathDistance;
+                }
+                
+                // For debugging tie-breaking
+                if (a.confidence === b.confidence && a.pathDistance === b.pathDistance) {
+                    console.log(`[SIC] 🔀 TIE-BREAK: "${a.concept.file.name}" vs "${b.concept.file.name}" (both ${a.confidence.toFixed(1)}%, distance ${a.pathDistance})`);
+                }
+                
+                // Tertiary sort for ties: alphabetical (logical default)
+                return a.concept.file.name.localeCompare(b.concept.file.name);
+            });
 
         console.log(`[SIC] 📊 Found ${related.length} related concepts, ${filteredResults.length} after filtering`);
         
+        // Debug: Show final order for comparison with legacy
+        console.log(`[SIC] 📋 FINAL ORDER:`);
+        filteredResults.slice(0, 10).forEach((r, index) => {
+            console.log(`[SIC]   ${index + 1}. ${r.concept.file.name} - ${r.confidence.toFixed(1)}% (path=${r.pathDistance}, subject=${r.concept.subject})`);
+        });
+        
         // Always show debug info for A-B testing
         dv.paragraph(`**CACHED: Found ${related.length} related concepts, ${filteredResults.length} after filtering**`);
+        dv.paragraph(`**CACHED: Final Order (first 10):**`);
+        filteredResults.slice(0, 10).forEach((r, index) => {
+            dv.paragraph(`  ${index + 1}. ${r.concept.file.name} - ${r.confidence.toFixed(1)}% (${r.concept.subject})`);
+        });
         if (filteredResults.length > 0) {
             dv.paragraph(`**CACHED: First 5 results:**`);
             filteredResults.slice(0, 5).forEach(r => {
-                dv.paragraph(`  • ${r.concept.file.name} (${r.concept.subject}, ${r.concept.domain}, ${r.concept.type}) - ${r.confidence.toFixed(1)}% (distance: ${r.pathDistance} jumps, score: ${r.pathScore.toFixed(2)})`);
+                // Separate field scores into regular and reverse for clarity
+                const regularFields = [];
+                const reverseFields = [];
+                
+                if (r.fieldScores) {
+                    Array.from(r.fieldScores.entries()).forEach(([field, score]) => {
+                        if (field.endsWith('-reverse')) {
+                            reverseFields.push(`${field}=${score}`);
+                        } else {
+                            regularFields.push(`${field}=${score}`);
+                        }
+                    });
+                }
+                
+                const fieldScoresText = regularFields.length > 0 ? regularFields.join(', ') : 'none';
+                const reverseScoresText = reverseFields.length > 0 ? reverseFields.join(', ') : 'none';
+                
+                dv.paragraph(`  • ${r.concept.file.name} (${r.concept.subject}, ${r.concept.domain}, ${r.concept.type}) - ${r.confidence.toFixed(1)}%`);
+                dv.paragraph(`    - path=${r.pathScore?.toFixed(2) || 0}, fields: ${fieldScoresText}, reverse: ${reverseScoresText}`);
             });
         }
         
