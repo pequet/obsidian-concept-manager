@@ -254,7 +254,7 @@ class ConceptWrappers {
         observeQuietMs = 200, 
         observeMaxWaitMs = 3000, 
         collapseEmptySections = true, 
-        showTimestamp = true, 
+        showTimestamp = false, 
         showTimeBuild = false 
     } = {}) {
         const { ConceptManager } = customJS;

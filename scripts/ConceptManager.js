@@ -1658,7 +1658,7 @@ class ConceptManager {
         const index = new Map();
         for (const hub of hubsAll) {
             const cats = this.normalizeValues_LEGACY(hub['domain-category']);
-            const canonical = hub['canonical-name'] ? String(hub['canonical-name']) : null;
+            const canonical = hub['name-canonical'] ? String(hub['name-canonical']) : null;
             const fileName = String(hub.file?.name || '');
             const display = canonical && canonical.trim().length > 0 ? canonical : fileName;
             for (const cat of cats) {
@@ -1712,18 +1712,18 @@ class ConceptManager {
 
         if (hub) {
             
-            // Check for explicit canonical-name field first
-            if (hub["canonical-name"]) {
+            // Check for explicit name-canonical field first
+            if (hub["name-canonical"]) {
                 if (debug) {
-                    dv.paragraph(`✅ Found explicit canonical-name: "${hub["canonical-name"]}" in Hub: ${hub.file.name}`);
+                    dv.paragraph(`✅ Found explicit name-canonical: "${hub["name-canonical"]}" in Hub: ${hub.file.name}`);
                 }
-                this._canonicalNameCache.set(cacheKey, hub["canonical-name"]);
-                return hub["canonical-name"];
+                this._canonicalNameCache.set(cacheKey, hub["name-canonical"]);
+                return hub["name-canonical"];
             } else {
                 // Fall back to file name (without .md extension)
                 const fileName = hub.file.name;
                 if (debug) {
-                    dv.paragraph(`✅ No canonical-name field found, using Hub name: "${fileName}"`);
+                    dv.paragraph(`✅ No name-canonical field found, using Hub name: "${fileName}"`);
                 }
                 this._canonicalNameCache.set(cacheKey, fileName);
                 return fileName;
@@ -1738,7 +1738,7 @@ class ConceptManager {
                 dv.paragraph("domain: concepts");
                 dv.paragraph(`domain-category: ${domainCategory}`);
                 dv.paragraph(`subject: ${subject}`);
-                dv.paragraph("canonical-name: [Your Display Name]  # optional - will use file name if omitted");
+                dv.paragraph("name-canonical: [Your Display Name]  # optional - will use file name if omitted");
                 dv.paragraph("status: active");
                 dv.paragraph("tags: notes-active");
                 dv.paragraph(`summary: Hub for organizing ${domainCategory} items`);
@@ -1867,9 +1867,10 @@ class ConceptManager {
         try {
             const __buildStart = this._getNowMs();
             const currentPage = dv.current();
+            let contentRendered = false; // Track if actual content was rendered
 
-            console.log(`[LEGACY] 🏢 Starting LEGACY Related Hubs for subject: ${currentPage.subject}`);
-            console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+            if (this.debug) console.log(`[LEGACY] 🏢 Starting LEGACY Related Hubs for subject: ${currentPage.subject}`);
+            if (this.debug) console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
             
             // Get config validation for the current page's subject
             const config = this.getConfigForSubject({ 
@@ -1918,6 +1919,7 @@ class ConceptManager {
                     }
                 });
                 dv.paragraph("---");
+                contentRendered = true; // Debug output counts as content
             }
             
             // Check if currentPage exists
@@ -2041,13 +2043,15 @@ class ConceptManager {
                     const rows = sortedPages.map(p => {
                         const row = [p.file.link, p.summary || ""];
                         row.push(p.type || "", p.domain || "");
-                        if (includeSubjectColumn) row.push(p.subject || "");
+                        if (includeSubjectColumn) row.push(p.subject === currentPage.subject ? "" : (p.subject || ""));
                         return row; 
                     });
 
                     dv.table(columns, rows);
+                    contentRendered = true; // Table was rendered
                 } else {
                     dv.paragraph("*No related Groups (Concepts/Core Patterns) found with matching domain categories. Please ensure pages have the appropriate frontmatter.*");
+                    contentRendered = true; // Message was rendered
                 }
 
             } else {
@@ -2128,6 +2132,7 @@ class ConceptManager {
                     // Proper bullet list of hub links
                     const hubItems = Array.from(hubs).map(hub => dv.fileLink(hub.file.path, false, hub.file.name));
                     dv.list(hubItems);
+                    contentRendered = true; // Hub links were rendered
 
                     // Find other Groups (Concepts/Core Patterns) in ALL matching Hubs
                     const validSubjectsSet3 = new Set(config.validSubjects || []);
@@ -2251,7 +2256,7 @@ class ConceptManager {
                                         row.push(hubsCell);
                                     }
                                     row.push(p.type || "", p.domain || "");
-                                    if (includeSubjectColumn) row.push(p.subject || "");
+                                    if (includeSubjectColumn) row.push(p.subject === currentPage.subject ? "" : (p.subject || ""));
   
 
                                     // row.push(p.summary);
@@ -2259,6 +2264,7 @@ class ConceptManager {
                                 });
 
                                 dv.table(columns, rows);
+                                contentRendered = true; // Table was rendered
                         } else {
                             // Fallback to original behavior if no domain categories or no groups have values for the key
                             const pagesArray = Array.from(relatedGroups);
@@ -2287,12 +2293,13 @@ class ConceptManager {
                                         row.push(hubsCell);
                                     }
                                     row.push(p.type || "", p.domain || "");
-                                    if (includeSubjectColumn) row.push(p.subject || "");
+                                    if (includeSubjectColumn) row.push(p.subject === currentPage.subject ? "" : (p.subject || ""));
                                     // row.push(p.summary);
                                     return row;
                                 });
 
                                 dv.table(columns, rows);
+                                contentRendered = true; // Table was rendered
                         }
                     } 
                 } else {
@@ -2303,11 +2310,12 @@ class ConceptManager {
 
             const __methodEnd = this._getNowMs();
             const buildTime = Math.round(__methodEnd - __buildStart);
-            console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
-            console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-            console.log(`[LEGACY] ✅ Legacy Related Hubs completed in ${buildTime}ms`);
+            if (this.debug) console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+            if (this.debug) console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+            if (this.debug) console.log(`[LEGACY] ✅ Legacy Related Hubs completed in ${buildTime}ms`);
 
-            if (showTimestamp) {
+            // Only show timestamp if actual content was rendered
+            if (showTimestamp && contentRendered) {
                 this._renderTimestamp({ dv, label: 'LEGACY Rendered at', durationMs: showTimeBuild ? buildTime : null });
             }
         } catch (error) {
@@ -2350,20 +2358,28 @@ class ConceptManager {
         try {
             const __buildStart = this._getNowMs();
             const currentPage = dv.current();
+            let contentRendered = false; // Track if actual content was rendered
 
-            console.log(`[SICK] 🏢 Starting cached Related Hubs for subject: ${currentPage.subject}`);
-            console.log(`[SICK] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+            if (this.debug) console.log(`[SIC] 🏢 Starting cached Related Hubs for subject: ${currentPage.subject}`);
+            if (this.debug) console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
             // *** CRITICAL: Get cached data ONCE and reuse ***
             const { SubjectIndexCache } = customJS;
             const cachedPages = SubjectIndexCache.run(dv);
             if (!cachedPages) {
-                console.log(`[SICK] ❌ Cache not available for Related Hubs`);
+                if (this.debug) console.log(`[SIC] ❌ Cache not available for Related Hubs`);
                 dv.paragraph("❌ Cache not available - cannot run cached version");
+                contentRendered = true; // Error message was rendered
+                
+                const __methodEnd = this._getNowMs();
+                const buildTime = Math.round(__methodEnd - __buildStart);
+                if (showTimestamp && contentRendered) {
+                    this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
+                }
                 return;
             }
             
-            console.log(`[SICK] ✅ Cache available with ${cachedPages.length} pages`);
+            if (this.debug) console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
 
             // Check if currentPage exists
             if (!currentPage) {
@@ -2378,12 +2394,12 @@ class ConceptManager {
             // Get and normalize the domain category key
             const domainCategoryKeys = this.normalizeValues_LEGACY(currentPage["domain-category"]);
             
-            console.log(`[SICK] 🔍 Domain categories: [${domainCategoryKeys.join(', ')}]`);
-            console.log(`[SICK] 🔍 Current page type: ${currentPage.type || 'undefined'}`);
+            if (this.debug) console.log(`[SIC] 🔍 Domain categories: [${domainCategoryKeys.join(', ')}]`);
+            if (this.debug) console.log(`[SIC] 🔍 Current page type: ${currentPage.type || 'undefined'}`);
 
             // Different behavior based on page type
             if (currentPage.type === "hub") {
-                console.log(`[SICK] 🏢 Processing as Hub page`);
+                if (this.debug) console.log(`[SIC] 🏢 Processing as Hub page`);
                 
                 // This is a Hub page - show all related Groups (Concept/Core Pattern) from cache
                 
@@ -2407,14 +2423,15 @@ class ConceptManager {
                     return pageCats.some(cat => domainCategoryKeys.includes(cat));
                 });
 
-                console.log(`[SICK] 🔍 Found ${relatedPages.length} related pages for hub`);
+                if (this.debug) console.log(`[SIC] 🔍 Found ${relatedPages.length} related pages for hub`);
 
                 if (relatedPages.length > 0) {
                     const pages = relatedPages.map(cp => cp._page);
                     
-                    // Determine if Subject column is needed (multiple subjects present)
+                    // Determine if Subject column is needed (subjects other than current page's subject)
                     const uniqueSubjects = Array.from(new Set(pages.map(p => p.subject).filter(Boolean)));
-                    const includeSubjectColumn = uniqueSubjects.length > 1;
+                    const nonCurrentSubjects = uniqueSubjects.filter(subject => subject !== currentPage.subject);
+                    const includeSubjectColumn = nonCurrentSubjects.length > 0;
 
                     // Sort by name for consistency
                     const sortedPages = [...pages].sort((a, b) => a.file.name.localeCompare(b.file.name));
@@ -2426,17 +2443,19 @@ class ConceptManager {
                     // Build rows
                     const rows = sortedPages.map(p => {
                         const row = [dv.fileLink(p.file.path, false, p.file.name), p.summary || "", p.type || "", p.domain || ""];
-                        if (includeSubjectColumn) row.push(p.subject || "");
+                        if (includeSubjectColumn) row.push(p.subject === currentPage.subject ? "" : (p.subject || ""));
                         return row; 
                     });
 
                     dv.table(columns, rows);
+                    contentRendered = true; // Table was rendered
                 } else {
                     dv.paragraph("*No related Groups (Concepts/Core Patterns) found with matching domain categories. Please ensure pages have the appropriate frontmatter.*");
+                    contentRendered = true; // Message was rendered
                 }
 
             } else {
-                console.log(`[SICK] 🔍 Processing as regular page`);
+                if (this.debug) console.log(`[SIC] 🔍 Processing as regular page`);
                 
                 // This is a regular page - show related Groups (Concepts/Core Patterns) and link to ALL matching Hubs
                 
@@ -2448,7 +2467,7 @@ class ConceptManager {
                     return hubCats.some(cat => domainCategoryKeys.includes(cat));
                 }).map(cp => cp._page);
 
-                console.log(`[SICK] 🔍 Found ${hubs.length} matching hubs`);
+                if (this.debug) console.log(`[SIC] 🔍 Found ${hubs.length} matching hubs`);
                     
                 // Show links to all hubs if found and headerLevel is greater than 0
                 if (headerLevel > 0 && hubs.length > 0) {
@@ -2462,6 +2481,7 @@ class ConceptManager {
                     // Proper bullet list of hub links
                     const hubItems = hubs.map(hub => dv.fileLink(hub.file.path, false, hub.file.name));
                     dv.list(hubItems);
+                    contentRendered = true; // Hub links were rendered
 
                     // Find other Groups (Concepts/Core Patterns) in ALL matching Hubs from cache
                     const allRelatedGroups = cachedPages.filter(cachedPage => {
@@ -2477,7 +2497,7 @@ class ConceptManager {
                     
                     const relatedGroups = allRelatedGroups.sort(p => p.file.name);
                     
-                    console.log(`[SICK] 🔍 Found ${relatedGroups.length} related groups across all hubs`);
+                    if (this.debug) console.log(`[SIC] 🔍 Found ${relatedGroups.length} related groups across all hubs`);
                         
                     if (relatedGroups.length > 0) {
                         if (headerLevel > 0) {
@@ -2491,9 +2511,10 @@ class ConceptManager {
                         // Check if any related group has a value for this category key
                         const anyGroupHasKeyValue = categoryKey && relatedGroups.some(p => p[categoryKey]);
                             
-                        // Include Subject column only if multiple subjects are present
+                        // Include Subject column only if there are subjects other than current page's subject
                         const uniqueSubjects = Array.from(new Set(relatedGroups.map(p => p.subject).filter(Boolean)));
-                        const includeSubjectColumn = uniqueSubjects.length > 1;
+                        const nonCurrentSubjects = uniqueSubjects.filter(subject => subject !== currentPage.subject);
+                        const includeSubjectColumn = nonCurrentSubjects.length > 0;
                         // Include Hubs column only when listing across multiple hubs
                         const includeHubsColumn = hubs.length > 1;
                         
@@ -2531,11 +2552,12 @@ class ConceptManager {
                                     row.push(hubsCell);
                                 }
                                 row.push(p.type || "", p.domain || "");
-                                if (includeSubjectColumn) row.push(p.subject || "");
+                                if (includeSubjectColumn) row.push(p.subject === currentPage.subject ? "" : (p.subject || ""));
                                 return row;
                             });
 
                             dv.table(columns, rows);
+                            contentRendered = true; // Table was rendered
                         } else {
                             // Fallback to original behavior if no domain categories or no groups have values for the key
                             const pagesArray = [...relatedGroups];
@@ -2564,11 +2586,12 @@ class ConceptManager {
                                     row.push(hubsCell);
                                 }
                                 row.push(p.type || "", p.domain || "");
-                                if (includeSubjectColumn) row.push(p.subject || "");
+                                if (includeSubjectColumn) row.push(p.subject === currentPage.subject ? "" : (p.subject || ""));
                                 return row;
                             });
 
                             dv.table(columns, rows);
+                            contentRendered = true; // Table was rendered
                         }
                     } 
                 } else {
@@ -2579,12 +2602,13 @@ class ConceptManager {
 
             const __methodEnd = this._getNowMs();
             const buildTime = Math.round(__methodEnd - __buildStart);
-            console.log(`[SICK] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
-            console.log(`[SICK] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-            console.log(`[SICK] ✅ Cached Related Hubs completed in ${buildTime}ms`);
+            if (this.debug) console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+            if (this.debug) console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+            if (this.debug) console.log(`[SIC] ✅ Cached Related Hubs completed in ${buildTime}ms`);
 
-            if (showTimestamp) {
-                this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
+            // Only show timestamp if actual content was rendered
+            if (showTimestamp && contentRendered) {
+                this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
             }
         } catch (error) {
             dv.header(headerLevel, "⚠️ Error Loading Content");
@@ -3288,10 +3312,11 @@ class ConceptManager {
         const __buildStart = this._getNowMs();
         const currentPage = dv.current();
         const currentSubject = subject || currentPage.subject;
+        let contentRendered = false; // Track if actual content was rendered
 
         if (this.debug) {
-            console.log(`[SICK] 🚀 Starting cached Classifications for subject: ${currentSubject}`);
-            console.log(`[SICK] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+            console.log(`[SIC] 🚀 Starting cached Classifications for subject: ${currentSubject}`);
+            console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
         }
 
         // Use SubjectIndexCache instead of vault scanning
@@ -3299,12 +3324,19 @@ class ConceptManager {
         const cachedPages = SubjectIndexCache.run(dv);
         
         if (!cachedPages) {
-            if (this.debug) console.log(`[SICK] ❌ Cache not available - falling back to original method`);
+            if (this.debug) console.log(`[SIC] ❌ Cache not available - falling back to original method`);
             dv.paragraph("❌ Cache not available - cannot run cached version");
+            contentRendered = true; // Error message was rendered
+            
+            const __methodEnd = this._getNowMs();
+            const buildTime = Math.round(__methodEnd - __buildStart);
+            if (showTimestamp && contentRendered) {
+                this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
+            }
             return;
         }
 
-        if (this.debug) console.log(`[SICK] ✅ Cache available with ${cachedPages.length} pages`);
+        if (this.debug) console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
 
         // Get config (same as original)
         const config = SubjectIndexCache.getConfig(dv, currentSubject);
@@ -3319,7 +3351,7 @@ class ConceptManager {
             normalizedValues.forEach(v => requestedValuesLower.add(v.toLowerCase()));
         });
 
-        if (this.debug) console.log(`[SICK] 🔍 Looking for values: [${Array.from(requestedValuesLower).join(', ')}]`);
+        if (this.debug) console.log(`[SIC] 🔍 Looking for values: [${Array.from(requestedValuesLower).join(', ')}]`);
 
         // FIXED: Build lookup maps from already-retrieved cache data (no additional cache calls)
         const __cacheToken = this._getNowMs();
@@ -3342,8 +3374,8 @@ class ConceptManager {
         });
         const cacheTime = this._getNowMs() - __cacheToken;
         
-        console.log(`[SICK] ⚡ Cache lookup completed in ${cacheTime.toFixed(2)}ms`);
-        console.log(`[SICK] 📊 Found ${byName.size} name matches, ${byAlias.size} alias matches`);
+        if (this.debug) console.log(`[SIC] ⚡ Cache lookup completed in ${cacheTime.toFixed(2)}ms`);
+        if (this.debug) console.log(`[SIC] 📊 Found ${byName.size} name matches, ${byAlias.size} alias matches`);
 
         // Insert wrapper header "Classifications" (same as original)
         const presentTypes = relationTypes.filter(type => {
@@ -3375,13 +3407,16 @@ class ConceptManager {
                 dv.paragraph(`Looking for hub with: type="hub" AND domain-category="${hubCategory}"`);
             }
             
-            // Get display name (can reuse original ConceptManager method)
-            const headerText = this.getDisplayNameForCategory({
-                dv,
-                domainCategory: hubCategory,
-                subject: currentSubject,
-                debug
+            // Get display name from cached data (avoid vault queries)
+            const hubPage = cachedPages.find(cachedPage => {
+                const page = cachedPage._page;
+                if (page.type !== 'hub') return false;
+                if (page.subject !== currentSubject) return false;
+                const hubCategories = SubjectIndexCache.normalizeValues(page['domain-category'] || []);
+                return hubCategories.includes(hubCategory);
             });
+            
+            const headerText = hubPage?._page['name-canonical'] || hubPage?._page.file?.name || hubCategory;
                     
             const groupFieldName = `group-${type}`;
             const currentValues = currentPage[groupFieldName];
@@ -3476,6 +3511,7 @@ class ConceptManager {
         bulletSections.forEach(({ headerText, bullets }) => {
             dv.header(headerLevel + 1, headerText);
             dv.list(bullets);
+            contentRendered = true; // Bullet list was rendered
         });
 
         // Display table if requested (same as original) 
@@ -3487,17 +3523,18 @@ class ConceptManager {
                 includeSubjectColumn ? row : [row[0], row[1], row[3]]
             );
             dv.table(headers, tableData);
+            contentRendered = true; // Table was rendered
         }
 
         const __methodEnd = this._getNowMs();
         const buildTime = Math.round(__methodEnd - __buildStart);
-        console.log(`[SICK] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
-        console.log(`[SICK] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-        console.log(`[SICK] ✅ Cached Classifications completed in ${buildTime}ms`);
+        if (this.debug) console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        if (this.debug) console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        if (this.debug) console.log(`[SIC] ✅ Cached Classifications completed in ${buildTime}ms`);
 
-        // Timestamp (same as original)
-        if (showTimestamp) {
-            this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
+        // Only show timestamp if actual content was rendered
+        if (showTimestamp && contentRendered) {
+            this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
         }
     }
 
@@ -3506,8 +3543,8 @@ class ConceptManager {
         const currentPage = dv.current();
         const currentSubject = subject || currentPage.subject;
         
-        console.log(`[LEGACY] 🐌 Starting LEGACY Classifications for subject: ${currentSubject}`);
-        console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+        if (this.debug) console.log(`[LEGACY] 🐌 Starting LEGACY Classifications for subject: ${currentSubject}`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         // Fetch config for gating and build sets for early filtering
         const __cfgForClassifications = this.getConfigForSubject({ dv, subject: currentSubject, debug: false });
@@ -3775,9 +3812,9 @@ class ConceptManager {
         
         const __legacyMethodEnd = this._getNowMs();
         const legacyBuildTime = Math.round(__legacyMethodEnd - __buildStart);
-        console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__legacyMethodEnd}ms`);
-        console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${legacyBuildTime}ms`);
-        console.log(`[LEGACY] ✅ Legacy Classifications completed in ${legacyBuildTime}ms`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__legacyMethodEnd}ms`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${legacyBuildTime}ms`);
+        if (this.debug) console.log(`[LEGACY] ✅ Legacy Classifications completed in ${legacyBuildTime}ms`);
         
         // Timestamp footer (below bullets/table) when section is present
         if (presentTypes.length > 0 && showTimestamp) {
@@ -3801,9 +3838,10 @@ class ConceptManager {
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
         const groupValue = currentPage.file.name;
+        let contentRendered = false; // Track if actual content was rendered
 
-        console.log(`[LEGACY] 🔗 Starting LEGACY Key Connections for subject: ${currentSubject}`);
-        console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+        if (this.debug) console.log(`[LEGACY] 🔗 Starting LEGACY Key Connections for subject: ${currentSubject}`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         const config = this.getConfigForSubject({ dv, subject: currentSubject, debug: false });
 
@@ -3932,15 +3970,17 @@ class ConceptManager {
                 : keyConnectionsTableRows.map(r => r.slice(0, 3));
 
             dv.table(headers, rows);
+            contentRendered = true; // Table was rendered
         }
 
         const __methodEnd = this._getNowMs();
         const buildTime = Math.round(__methodEnd - __buildStart);
-        console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
-        console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-        console.log(`[LEGACY] ✅ Legacy Key Connections completed in ${buildTime}ms`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        if (this.debug) console.log(`[LEGACY] ✅ Legacy Key Connections completed in ${buildTime}ms`);
 
-        if (showTimestamp) {
+        // Only show timestamp if actual content was rendered
+        if (showTimestamp && contentRendered) {
             this._renderTimestamp({ dv, label: 'LEGACY Rendered at', durationMs: showTimeBuild ? buildTime : null });
         }
     }
@@ -3950,19 +3990,20 @@ class ConceptManager {
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
         const groupValue = currentPage.file.name;
+        let contentRendered = false; // Track if actual content was rendered
 
-        console.log(`[SICK] 🔗 Starting cached Key Connections for subject: ${currentSubject}`);
-        console.log(`[SICK] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+        if (this.debug) console.log(`[SIC] 🔗 Starting cached Key Connections for subject: ${currentSubject}`);
+        if (this.debug) console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         // *** CRITICAL: Get cached data ONCE and reuse ***
         const { SubjectIndexCache } = customJS;
         const cachedPages = SubjectIndexCache.run(dv);
         if (!cachedPages) {
-            console.log(`[SICK] ❌ Cache not available for Key Connections`);
+            if (this.debug) console.log(`[SIC] ❌ Cache not available for Key Connections`);
             return;
         }
         
-        console.log(`[SICK] ✅ Cache available with ${cachedPages.length} pages`);
+        if (this.debug) console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
 
         // Filter cached pages for eligible connections (same logic as legacy)
         const eligibleForGroups = cachedPages.filter(cachedPage => {
@@ -3971,7 +4012,7 @@ class ConceptManager {
             return true; // subject/domain gating already applied in cache
         });
 
-        console.log(`[SICK] 🔍 Found ${eligibleForGroups.length} eligible pages for connections`);
+        if (this.debug) console.log(`[SIC] 🔍 Found ${eligibleForGroups.length} eligible pages for connections`);
 
         // *** BUILD HUB LOOKUP FROM CACHE (avoid vault queries) ***
         const hubLookup = new Map(); // domainCategory -> relation label
@@ -3981,11 +4022,11 @@ class ConceptManager {
                 const page = hubPage._page;
                 const hubCategories = this.normalizeValues_LEGACY(page['domain-category'] || []);
                 hubCategories.forEach(category => {
-                    const relationLabel = page['relation-outgoing'] || category; // Use simple fallback to avoid vault queries
+                    const relationLabel = page['relation-outgoing'] || page.file.name; // Use page name instead of kebab-case category
                     hubLookup.set(category, relationLabel);
                 });
             });
-        console.log(`[SICK] 🏢 Built hub lookup from cache: ${hubLookup.size} categories`);
+        if (this.debug) console.log(`[SIC] 🏢 Built hub lookup from cache: ${hubLookup.size} categories`);
 
         // Collect rows for consolidated table
         const keyConnectionsTableRows = [];
@@ -4002,7 +4043,7 @@ class ConceptManager {
                 return pageValues.some(val => String(val).toLowerCase() === groupValueLower);
             });
             matchesByType.set(type, matches);
-            console.log(`[SICK] 🔍 Found ${matches.length} matches for relation type: ${type}`);
+            if (this.debug) console.log(`[SIC] 🔍 Found ${matches.length} matches for relation type: ${type}`);
         });
 
         // Compute total connections using cached matches
@@ -4055,16 +4096,18 @@ class ConceptManager {
                 : keyConnectionsTableRows.map(r => r.slice(0, 3));
 
             dv.table(headers, rows);
+            contentRendered = true; // Table was rendered
         }
 
         const __methodEnd = this._getNowMs();
         const buildTime = Math.round(__methodEnd - __buildStart);
-        console.log(`[SICK] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
-        console.log(`[SICK] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-        console.log(`[SICK] ✅ Cached Key Connections completed in ${buildTime}ms`);
+        if (this.debug) console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        if (this.debug) console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        if (this.debug) console.log(`[SIC] ✅ Cached Key Connections completed in ${buildTime}ms`);
 
-        if (showTimestamp) {
-            this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
+        // Only show timestamp if actual content was rendered
+        if (showTimestamp && contentRendered) {
+            this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
         }
     }
 
@@ -4083,9 +4126,10 @@ class ConceptManager {
         const __buildStart = this._getNowMs();
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
+        let contentRendered = false; // Track if actual content was rendered
 
-        console.log(`[LEGACY] 📚 Starting LEGACY Related Content for subject: ${currentSubject}`);
-        console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+        if (this.debug) console.log(`[LEGACY] 📚 Starting LEGACY Related Content for subject: ${currentSubject}`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         // Default validSubjects to current subject if not provided
         const subjectsToUse = (validSubjects && validSubjects.length > 0) ? validSubjects : [currentSubject];
@@ -4168,9 +4212,10 @@ class ConceptManager {
             if (filteredResults.length === 0) {
                 dv.paragraph("No related \"CONCEPTS\" found.");
             } else {
-            // Include Subject column if results span multiple subjects (within the subjectsToUse filter)
+            // Include Subject column if there are subjects other than current page's subject
             const uniqueSubjects = Array.from(new Set(filteredResults.map(r => r.concept.subject).filter(Boolean)));
-            const includeSubjectColumn = uniqueSubjects.length > 1;
+            const nonCurrentSubjects = uniqueSubjects.filter(subject => subject !== currentPage.subject);
+            const includeSubjectColumn = nonCurrentSubjects.length > 0;
 
             const headers = ["Name", "Type", "Domain", "Confidence", ...(includeSubjectColumn ? ["Subject"] : [])];
             const rows = filteredResults.map(r => [
@@ -4178,19 +4223,21 @@ class ConceptManager {
                         r.concept.type || "",
                         r.concept.domain || "",  
                         `${r.confidence.toFixed(1)}%`,
-                        ...(includeSubjectColumn ? [r.concept.subject || ""] : [])
+                        ...(includeSubjectColumn ? [r.concept.subject === currentPage.subject ? "" : (r.concept.subject || "")] : [])
             ]);
 
             dv.table(headers, rows);
+            contentRendered = true; // Table was rendered
         }
 
         const __methodEnd = this._getNowMs();
         const buildTime = Math.round(__methodEnd - __buildStart);
-        console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
-        console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-        console.log(`[LEGACY] ✅ Legacy Related Content completed in ${buildTime}ms`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        if (this.debug) console.log(`[LEGACY] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        if (this.debug) console.log(`[LEGACY] ✅ Legacy Related Content completed in ${buildTime}ms`);
 
-        if (showTimestamp) {
+        // Only show timestamp if actual content was rendered
+        if (showTimestamp && contentRendered) {
             this._renderTimestamp({ dv, label: 'LEGACY Rendered at', durationMs: showTimeBuild ? buildTime : null });
         }
     }
@@ -4199,20 +4246,28 @@ class ConceptManager {
         const __buildStart = this._getNowMs();
         const currentPage = dv.current();
         const currentSubject = currentPage.subject;
+        let contentRendered = false; // Track if actual content was rendered
 
-        console.log(`[SICK] 📚 Starting cached Related Content for subject: ${currentSubject}`);
-        console.log(`[SICK] ⏱️ METHOD START TIME: ${__buildStart}ms`);
+        if (this.debug) console.log(`[SIC] 📚 Starting cached Related Content for subject: ${currentSubject}`);
+        if (this.debug) console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
         // *** CRITICAL: Get cached data ONCE and reuse ***
         const { SubjectIndexCache } = customJS;
         const cachedPages = SubjectIndexCache.run(dv);
         if (!cachedPages) {
-            console.log(`[SICK] ❌ Cache not available for Related Content`);
+            if (this.debug) console.log(`[SIC] ❌ Cache not available for Related Content`);
             dv.paragraph("❌ Cache not available - cannot run cached version");
+            contentRendered = true; // Error message was rendered
+            
+            const __methodEnd = this._getNowMs();
+            const buildTime = Math.round(__methodEnd - __buildStart);
+            if (showTimestamp && contentRendered) {
+                this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
+            }
             return;
         }
         
-        console.log(`[SICK] ✅ Cache available with ${cachedPages.length} pages`);
+        if (this.debug) console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
 
         // *** CRITICAL: Get config to get proper subject filtering like legacy version ***
         const config = this.getConfigForSubject({ 
@@ -4231,7 +4286,7 @@ class ConceptManager {
             subjectsToUse = [currentSubject];
         }
         
-        console.log(`[SICK] 🔧 Subject filtering: parameter=[${(validSubjects || []).join(', ')}], config=[${(config.validSubjects || []).join(', ')}], final=[${subjectsToUse.join(', ')}]`);
+        if (this.debug) console.log(`[SIC] 🔧 Subject filtering: parameter=[${(validSubjects || []).join(', ')}], config=[${(config.validSubjects || []).join(', ')}], final=[${subjectsToUse.join(', ')}]`);
 
         // Build match criteria from current page's group-* fields and domain-category
         const matchCriteria = {};
@@ -4252,12 +4307,12 @@ class ConceptManager {
                 if (validation.isValid) {
                 matchCriteria[groupFieldName] = true;
                 } else {
-                    console.log(`[SICK] ⚠️ Skipping invalid group field: ${validation.reason}`);
+                    if (this.debug) console.log(`[SIC] ⚠️ Skipping invalid group field: ${validation.reason}`);
                 }
             }
         });
 
-        console.log(`[SICK] 🔍 Match criteria: ${Object.keys(matchCriteria).join(', ')}`);
+        if (this.debug) console.log(`[SIC] 🔍 Match criteria: ${Object.keys(matchCriteria).join(', ')}`);
 
         // Debug info for A-B testing
         if (debug) {
@@ -4314,7 +4369,7 @@ class ConceptManager {
             return true;
         });
 
-        console.log(`[SICK] 🔍 Found ${eligiblePages.length} eligible pages for related content`);
+        if (this.debug) console.log(`[SIC] 🔍 Found ${eligiblePages.length} eligible pages for related content`);
 
         // Debug info for A-B testing
         if (debug) {
@@ -4360,7 +4415,7 @@ class ConceptManager {
                 });
                 
                 // Debug logging for distance calculation
-                console.log(`[SICK] 📏 Path distance: ${page.file.name} - distance=${distance}, score=${pathScore.toFixed(2)}, confidence=${confidence.toFixed(1)}%`);
+                if (this.debug) console.log(`[SIC] 📏 Path distance: ${page.file.name} - distance=${distance}, score=${pathScore.toFixed(2)}, confidence=${confidence.toFixed(1)}%`);
             }
         });
 
@@ -4398,7 +4453,7 @@ class ConceptManager {
                     dv.paragraph(`**CACHED Step ${stepCounter}: Checking frontmatter field '${field}'**`);
                     dv.paragraph(`❌ Target value is null/undefined for '${field}' - skipping`);
                 }
-                console.log(`[SICK] ⚠️ Step ${stepCounter}: Target value is null/undefined for '${field}' - skipping`);
+                if (this.debug) console.log(`[SIC] ⚠️ Step ${stepCounter}: Target value is null/undefined for '${field}' - skipping`);
                 stepCounter++;
                 return;
             }
@@ -4413,10 +4468,10 @@ class ConceptManager {
                 dv.paragraph(`  • Query: Find cached pages where ${field} contains ANY of [${targetValues.join(', ')}] AND subject in valid_subjects`);
             }
             
-            console.log(`[SICK] 🔍 Step ${stepCounter}: Checking frontmatter field '${field}'`);
-            console.log(`[SICK]   • Target value(s): [${targetValues.join(', ')}]`);
-            console.log(`[SICK]   • Subject filter: [${subjectsToUse.join(', ')}]`);
-            console.log(`[SICK]   • Domain filter: [${(config.validDomains || []).join(', ')}]`);
+            if (this.debug) console.log(`[SIC] 🔍 Step ${stepCounter}: Checking frontmatter field '${field}'`);
+            if (this.debug) console.log(`[SIC]   • Target value(s): [${targetValues.join(', ')}]`);
+            if (this.debug) console.log(`[SIC]   • Subject filter: [${subjectsToUse.join(', ')}]`);
+            if (this.debug) console.log(`[SIC]   • Domain filter: [${(config.validDomains || []).join(', ')}]`);
             
             // Find matching pages from cache (equivalent to legacy's dv.pages() query)
             let matchCount = 0;
@@ -4446,7 +4501,7 @@ class ConceptManager {
                             fieldScores: new Map()
                         };
                         related.push(existingEntry);
-                        console.log(`[SICK]     → NEW ENTRY: ${page.file.name} (not in path scoring)`);
+                        if (this.debug) console.log(`[SIC]     → NEW ENTRY: ${page.file.name} (not in path scoring)`);
                     }
                     
                     // Award points for matches (same as legacy)
@@ -4455,7 +4510,7 @@ class ConceptManager {
                     existingEntry.fieldScores.set(field, fieldScore);
                     
                     matchCount++;
-                    console.log(`[SICK]     → ${page.file.name}: ${matchingValues.length} matching values (${matchingValues.join(', ')}) = ${fieldScore} points`);
+                    if (this.debug) console.log(`[SIC]     → ${page.file.name}: ${matchingValues.length} matching values (${matchingValues.join(', ')}) = ${fieldScore} points`);
                 }
             });
             
@@ -4482,7 +4537,7 @@ class ConceptManager {
                 dv.paragraph("---");
             }
             
-            console.log(`[SICK]   • Found ${matchCount} pages matching '${field}' criteria`);
+            if (this.debug) console.log(`[SIC]   • Found ${matchCount} pages matching '${field}' criteria`);
             stepCounter++;
         });
 
@@ -4501,9 +4556,9 @@ class ConceptManager {
                 dv.paragraph("---");
             }
             
-            console.log(`[SICK] 🔄 Step ${stepCounter}: Reverse relationship lookup`);
-            console.log(`[SICK]   • Current page name: "${currentPageName}"`);
-            console.log(`[SICK]   • Domain categories: [${domainCategories.join(', ')}]`);
+            if (this.debug) console.log(`[SIC] 🔄 Step ${stepCounter}: Reverse relationship lookup`);
+            if (this.debug) console.log(`[SIC]   • Current page name: "${currentPageName}"`);
+            if (this.debug) console.log(`[SIC]   • Domain categories: [${domainCategories.join(', ')}]`);
             
             domainCategories.forEach(category => {
                 const groupFieldName = `group-${category}`;
@@ -4516,7 +4571,7 @@ class ConceptManager {
                 
                 if (!validation.isValid) {
                     if (debug) dv.paragraph(`⚠️ Skipping reverse lookup for invalid group field: ${validation.reason}`);
-                    console.log(`[SICK] ⚠️ Skipping reverse lookup for invalid group field: ${validation.reason}`);
+                    if (this.debug) console.log(`[SIC] ⚠️ Skipping reverse lookup for invalid group field: ${validation.reason}`);
                     return;
                 }
                 
@@ -4527,8 +4582,8 @@ class ConceptManager {
                     dv.paragraph(`  • Subject filter: [${subjectsToUse.join(', ')}]`);
                 }
                 
-                console.log(`[SICK]   🔍 Looking for pages with field: "${groupFieldName}"`);
-                console.log(`[SICK]   🔍 That contain value: "${currentPageName}"`);
+                if (this.debug) console.log(`[SIC]   🔍 Looking for pages with field: "${groupFieldName}"`);
+                if (this.debug) console.log(`[SIC]   🔍 That contain value: "${currentPageName}"`);
                 
                 // Find pages that reference the current page in this group field (using cached data)
                 let reverseMatchCount = 0;
@@ -4563,7 +4618,7 @@ class ConceptManager {
                                 fieldScores: new Map()
                             };
                             related.push(existingEntry);
-                            console.log(`[SICK]     → NEW ENTRY: ${page.file.name} (reverse reference only)`);
+                            if (this.debug) console.log(`[SIC]     → NEW ENTRY: ${page.file.name} (reverse reference only)`);
                         }
                         
                         // Award points for reverse relationships (same as legacy)
@@ -4571,12 +4626,14 @@ class ConceptManager {
                         existingEntry.fieldScores.set(`${groupFieldName}-reverse`, points);
                         
                         reverseMatchCount++;
-                        console.log(`[SICK]     → ${page.file.name}: ${groupFieldName}=[${Array.isArray(fieldValue) ? fieldValue.join(', ') : fieldValue}] (contains: ${currentPageName}) = ${points} points`);
+                        if (this.debug) console.log(`[SIC]     → ${page.file.name}: ${groupFieldName}=[${Array.isArray(fieldValue) ? fieldValue.join(', ') : fieldValue}] (contains: ${currentPageName}) = ${points} points`);
                     }
                 });
                 
-                dv.paragraph(`**CACHED REVERSE LOOKUP RESULTS:**`);
-                dv.paragraph(`  • Found ${reverseMatchCount} cached pages with reverse references`);
+                if (debug) {
+                    dv.paragraph(`**CACHED REVERSE LOOKUP RESULTS:**`);
+                    dv.paragraph(`  • Found ${reverseMatchCount} cached pages with reverse references`);
+                }
                 if (debug) {
                     if (reverseMatchCount > 0) {
                         dv.paragraph(`  • Each gets ${reverseScoreMultiplier} points for containing "${currentPageName}" in ${groupFieldName}`);
@@ -4584,7 +4641,7 @@ class ConceptManager {
                     dv.paragraph("---");
                 }
                 
-                console.log(`[SICK]   • Found ${reverseMatchCount} pages with reverse references`);
+                if (this.debug) console.log(`[SIC]   • Found ${reverseMatchCount} pages with reverse references`);
             });
             
             stepCounter++;
@@ -4604,8 +4661,8 @@ class ConceptManager {
                 dv.paragraph("---");
             }
             
-            console.log(`[SICK] ➡️ Step ${stepCounter}: Forward relationship lookup (current → others)`);
-            console.log(`[SICK]   • Current group fields: [${currentGroupFields.join(', ')}]`);
+            if (this.debug) console.log(`[SIC] ➡️ Step ${stepCounter}: Forward relationship lookup (current → others)`);
+            if (this.debug) console.log(`[SIC]   • Current group fields: [${currentGroupFields.join(', ')}]`);
             
             currentGroupFields.forEach(groupFieldName => {
                 // Validate this group field against config (same as legacy)
@@ -4616,7 +4673,7 @@ class ConceptManager {
 
                 if (!validation.isValid) {
                     if (debug) dv.paragraph(`⚠️ Skipping forward lookup for invalid group field: ${validation.reason}`);
-                    console.log(`[SICK] ⚠️ Skipping forward lookup for invalid group field: ${validation.reason}`);
+                    if (this.debug) console.log(`[SIC] ⚠️ Skipping forward lookup for invalid group field: ${validation.reason}`);
                     return;
                 }
 
@@ -4630,9 +4687,9 @@ class ConceptManager {
                     dv.paragraph(`  • And whose domain-category includes: "${expectedCategory}"`);
                 }
                 
-                console.log(`[SICK]   🔍 Forward lookup for ${groupFieldName}`);
-                console.log(`[SICK]     • Values: [${entityNames.join(', ')}]`);
-                console.log(`[SICK]     • Expected category: "${expectedCategory}"`);
+                if (this.debug) console.log(`[SIC]   🔍 Forward lookup for ${groupFieldName}`);
+                if (this.debug) console.log(`[SIC]     • Values: [${entityNames.join(', ')}]`);
+                if (this.debug) console.log(`[SIC]     • Expected category: "${expectedCategory}"`);
 
                 let totalForwardMatches = 0;
                 entityNames.forEach(nameValue => {
@@ -4667,7 +4724,7 @@ class ConceptManager {
                                 fieldScores: new Map()
                             };
                             related.push(existingEntry);
-                            console.log(`[SICK]     → NEW ENTRY: ${page.file.name} (forward reference only)`);
+                            if (this.debug) console.log(`[SIC]     → NEW ENTRY: ${page.file.name} (forward reference only)`);
                         }
                         
                         // Award points for the forward reference from current page (same as legacy)
@@ -4676,7 +4733,7 @@ class ConceptManager {
                         
                         matchCount++;
                         totalForwardMatches++;
-                        console.log(`[SICK]     → ${page.file.name}: name matches "${nameValue}" AND domain-category includes "${expectedCategory}" = ${forwardScoreMultiplier} points`);
+                        if (this.debug) console.log(`[SIC]     → ${page.file.name}: name matches "${nameValue}" AND domain-category includes "${expectedCategory}" = ${forwardScoreMultiplier} points`);
                     });
                     
                     if (debug && matchCount > 0) {
@@ -4704,7 +4761,7 @@ class ConceptManager {
                     dv.paragraph("---");
                 }
                 
-                console.log(`[SICK]     • Total matches for ${groupFieldName}: ${totalForwardMatches}`);
+                if (this.debug) console.log(`[SIC]     • Total matches for ${groupFieldName}: ${totalForwardMatches}`);
             });
             
             if (debug) {
@@ -4785,8 +4842,8 @@ class ConceptManager {
             dv.paragraph("---");
         }
         
-        console.log(`[SICK] 🧮 Step ${stepCounter}: Calculating final scores`);
-        console.log(`[SICK]   • Total concepts found: ${related.length}`);
+        if (this.debug) console.log(`[SIC] 🧮 Step ${stepCounter}: Calculating final scores`);
+        if (this.debug) console.log(`[SIC]   • Total concepts found: ${related.length}`);
         
         // Calculate confidence for each concept (same as legacy)
         related.forEach(entry => {
@@ -4803,7 +4860,7 @@ class ConceptManager {
             // Calculate confidence as percentage (same as legacy)
             entry.confidence = maxPossibleScore > 0 ? (totalScore / maxPossibleScore) * 100 : 0;
             
-            console.log(`[SICK]     → ${entry.concept.file.name}: path=${pathScore.toFixed(2)}, fields=${frontmatterScores.toFixed(2)}, total=${totalScore.toFixed(2)}/${maxPossibleScore.toFixed(2)} = ${entry.confidence.toFixed(1)}%`);
+            if (this.debug) console.log(`[SIC]     → ${entry.concept.file.name}: path=${pathScore.toFixed(2)}, fields=${frontmatterScores.toFixed(2)}, total=${totalScore.toFixed(2)}/${maxPossibleScore.toFixed(2)} = ${entry.confidence.toFixed(1)}%`);
         });
 
         const filteredResults = related
@@ -4822,14 +4879,14 @@ class ConceptManager {
                 
                 // For debugging tie-breaking
                 if (a.confidence === b.confidence && a.pathDistance === b.pathDistance) {
-                    console.log(`[SICK] 🔀 TIE-BREAK: "${a.concept.file.name}" vs "${b.concept.file.name}" (both ${a.confidence.toFixed(1)}%, distance ${a.pathDistance})`);
+                    if (this.debug) console.log(`[SIC] 🔀 TIE-BREAK: "${a.concept.file.name}" vs "${b.concept.file.name}" (both ${a.confidence.toFixed(1)}%, distance ${a.pathDistance})`);
                 }
                 
                 // Tertiary sort for ties: alphabetical (logical default)
                 return a.concept.file.name.localeCompare(b.concept.file.name);
             });
 
-        console.log(`[SICK] 📊 Found ${related.length} related concepts, ${filteredResults.length} after basic filtering`);
+        if (this.debug) console.log(`[SIC] 📊 Found ${related.length} related concepts, ${filteredResults.length} after basic filtering`);
         
         // *** SMART FILTERING (same logic as getRelatedConcepts) ***
         stepCounter++;
@@ -4866,7 +4923,7 @@ class ConceptManager {
                 adaptiveMinScore = Math.max(0.05, targetScore / 100);
                 
                 if (debug) dv.paragraph(`**CACHED: Adaptive MinScore:** Lowered from ${(minScore * 100).toFixed(1)}% to ${(adaptiveMinScore * 100).toFixed(1)}% to reach minResults=${minResults}`);
-                console.log(`[SICK] 📉 Adaptive threshold: ${(minScore * 100).toFixed(1)}% → ${(adaptiveMinScore * 100).toFixed(1)}% to get ${minResults} results`);
+                if (this.debug) console.log(`[SIC] 📉 Adaptive threshold: ${(minScore * 100).toFixed(1)}% → ${(adaptiveMinScore * 100).toFixed(1)}% to get ${minResults} results`);
             }
         }
         
@@ -4906,7 +4963,7 @@ class ConceptManager {
                 
                 if (addedTies > 0) {
                     if (debug) dv.paragraph(`**CACHED: Tie extension:** Added ${addedTies} more results with same confidence (${lastIncludedScore.toFixed(1)}%) as result #${maxResults}`);
-                    console.log(`[SICK] 🔗 Extended for ties: +${addedTies} results at ${lastIncludedScore.toFixed(1)}%`);
+                    if (this.debug) console.log(`[SIC] 🔗 Extended for ties: +${addedTies} results at ${lastIncludedScore.toFixed(1)}%`);
                 } else {
                     if (debug) dv.paragraph(`**CACHED: No ties:** Exactly ${maxResults} results (next result has different confidence)`);
                 }
@@ -4922,9 +4979,9 @@ class ConceptManager {
         const finalFilteredResults = smartFilteredResults;
         
         // Debug: Show final order for comparison with legacy
-        console.log(`[SICK] 📋 FINAL ORDER (${finalFilteredResults.length} results after smart filtering):`);
+        if (this.debug) console.log(`[SIC] 📋 FINAL ORDER (${finalFilteredResults.length} results after smart filtering):`);
         finalFilteredResults.slice(0, 10).forEach((r, index) => {
-            console.log(`[SICK]   ${index + 1}. ${r.concept.file.name} - ${r.confidence.toFixed(1)}% (path=${r.pathDistance}, subject=${r.concept.subject})`);
+            if (this.debug) console.log(`[SIC]   ${index + 1}. ${r.concept.file.name} - ${r.confidence.toFixed(1)}% (path=${r.pathDistance}, subject=${r.concept.subject})`);
         });
         
         // Debug info for A-B testing
@@ -4996,9 +5053,10 @@ class ConceptManager {
         if (finalFilteredResults.length === 0) {
             dv.paragraph("No related \"CONCEPTS\" found after smart filtering.");
         } else {
-            // Include Subject column if results span multiple subjects (within the subjectsToUse filter)
+            // Include Subject column if there are subjects other than current page's subject
             const uniqueSubjects = Array.from(new Set(finalFilteredResults.map(r => r.concept.subject).filter(Boolean)));
-            const includeSubjectColumn = uniqueSubjects.length > 1;
+            const nonCurrentSubjects = uniqueSubjects.filter(subject => subject !== currentPage.subject);
+            const includeSubjectColumn = nonCurrentSubjects.length > 0;
 
             const headers = ["Name", "Type", "Domain", "Confidence", ...(includeSubjectColumn ? ["Subject"] : [])];
             const rows = finalFilteredResults.map(r => [
@@ -5006,20 +5064,22 @@ class ConceptManager {
                 r.concept.type || "",
                 r.concept.domain || "",  
                 `${r.confidence.toFixed(1)}%`,
-                ...(includeSubjectColumn ? [r.concept.subject || ""] : [])
+                ...(includeSubjectColumn ? [r.concept.subject === currentPage.subject ? "" : (r.concept.subject || "")] : [])
             ]);
 
             dv.table(headers, rows);
+            contentRendered = true; // Table was rendered
         }
 
         const __methodEnd = this._getNowMs();
         const buildTime = Math.round(__methodEnd - __buildStart);
-        console.log(`[SICK] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
-        console.log(`[SICK] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-        console.log(`[SICK] ✅ Cached Related Content completed in ${buildTime}ms with ${finalFilteredResults.length} results`);
+        if (this.debug) console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+        if (this.debug) console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+        if (this.debug) console.log(`[SIC] ✅ Cached Related Content completed in ${buildTime}ms with ${finalFilteredResults.length} results`);
 
-        if (showTimestamp) {
-            this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
+        // Only show timestamp if actual content was rendered
+        if (showTimestamp && contentRendered) {
+            this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
         }
     }
 
@@ -5307,7 +5367,7 @@ class ConceptManager {
                 dv.paragraph(`Should run Cache Prep: ${cachePrepEnabled ? "Yes" : "No"}`);
             }
             if (cachePrepEnabled) {
-                if (headerLevel > 0) dv.header(headerLevel, "🔧 Cache Preparation");
+                // Cache preparation is silent - no header output
                 this.prepareCacheForSubject({ 
                     dv, 
                     headerLevel: headerLevel + 1, 
@@ -5350,7 +5410,7 @@ class ConceptManager {
                 dv.paragraph(`Should run Classifications Cached: ${classificationsEnabled ? "Yes" : "No"}`);
             }
             if (classificationsEnabled) {
-                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Classifications");
+                if (headerLevel > 0 && debug) dv.header(headerLevel, "⚡ CACHED Classifications");
                 const relationTypes = configData.validFilters || [];
                 this.renderConceptClassificationsCached({ dv, relationTypes, headerLevel: headerLevel + 1, subject: currentPage.subject, showTable: false, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
@@ -5386,7 +5446,7 @@ class ConceptManager {
                 dv.paragraph(`Should run Key Connections Cached: ${keyConnectionsEnabled ? "Yes" : "No"}`);
             }
             if (keyConnectionsEnabled) {
-                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Key Connections");
+                if (headerLevel > 0 && debug) dv.header(headerLevel, "⚡ CACHED Key Connections");
                 const relationTypes = configData.validFilters || [];
                 this.renderKeyConnectionsForConcept({ dv, relationTypes, headerLevel: headerLevel + 1, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
@@ -5422,7 +5482,7 @@ class ConceptManager {
                 dv.paragraph(`Should run Related Content Cached: ${relatedContentEnabled ? "Yes" : "No"}`);
             }
             if (relatedContentEnabled) {
-                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Related Content");
+                if (headerLevel > 0 && debug) dv.header(headerLevel, "⚡ CACHED Related Content");
                 const relationTypes = configData.validFilters || [];
                 this.renderTopRelatedContent({ dv, relationTypes, headerLevel: headerLevel + 1, debug, showTimestamp, showTimeBuild });
                 viewsGenerated++;
@@ -5465,7 +5525,7 @@ class ConceptManager {
                 dv.paragraph(`Should run Related Hubs Cached: ${relatedHubsEnabled ? "Yes" : "No"}`);
                 }
             if (relatedHubsEnabled) {
-                if (headerLevel > 0) dv.header(headerLevel, "⚡ CACHED Related Hubs");
+                if (headerLevel > 0 && debug) dv.header(headerLevel, "⚡ CACHED Related Hubs");
                 this.generateViewTable({ 
                     dv, 
                     headerLevel: headerLevel + 1,
@@ -5614,25 +5674,19 @@ class ConceptManager {
             // Report cache status
             if (cacheBuildTime > 50) {
                 if (cacheAge && cacheAge >= 5) {
-                    console.log(`[CACHE PREP] ✅ Cache was STALE (${cacheAge.toFixed(1)}min old) - rebuilt in ${cacheBuildTime}ms (${cachedPages.length} pages)`);
+                    if (this.debug) console.log(`[CACHE PREP] ✅ Cache was STALE (${cacheAge.toFixed(1)}min old) - rebuilt in ${cacheBuildTime}ms (${cachedPages.length} pages)`);
                 } else {
-                    console.log(`[CACHE PREP] ✅ Cache built FRESH in ${cacheBuildTime}ms (${cachedPages.length} pages) - Total method time: ${buildTime}ms`);
+                    if (this.debug) console.log(`[CACHE PREP] ✅ Cache built FRESH in ${cacheBuildTime}ms (${cachedPages.length} pages) - Total method time: ${buildTime}ms`);
                 }
             } else {
-                console.log(`[CACHE PREP] ✅ Cache REUSED existing in ${cacheBuildTime}ms (${cachedPages.length} pages, age: ${cacheAge ? cacheAge.toFixed(1) + 'min' : 'unknown'}) - Total method time: ${buildTime}ms`);
+                if (this.debug) console.log(`[CACHE PREP] ✅ Cache REUSED existing in ${cacheBuildTime}ms (${cachedPages.length} pages, age: ${cacheAge ? cacheAge.toFixed(1) + 'min' : 'unknown'}) - Total method time: ${buildTime}ms`);
             }
 
-            if (showTimestamp) {
-                this._renderTimestamp({ dv, label: 'CACHE PREP Rendered at', durationMs: showTimeBuild ? buildTime : null });
-            }
+            // Cache preparation is silent - no output to page
 
         } catch (error) {
-            if (headerLevel > 0) {
-                dv.header(headerLevel, "⚠️ Cache Preparation Error");
-            }
-            dv.paragraph("**Something went wrong during cache preparation.**");
-            dv.paragraph(`Error: ${error.message}`);
-            console.error("[CACHE PREP] Error during cache preparation:", error);
+            // Cache preparation is silent - only log errors to console
+            if (this.debug) console.error("[CACHE PREP] Error during cache preparation:", error);
         }
     }
 }

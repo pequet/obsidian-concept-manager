@@ -5,12 +5,50 @@ This is a CustomJS Class designed for **advanced content discovery** and **workf
 ## Features
 
  - Dynamic concept relationship mapping
- - Contextual Activation (scope-aware) activates only context-relevant vault regions via Subject- and Domain- specific filtering for discovery and relationship traversal
+ - Contextual Activation (scope-aware) lights up only context‑relevant regions for discovery and traversal. See: [Contextual Activation](docs/100-Contextual-Activation.md).
  - Bidirectional relationship discovery (forward and reverse references)
  - Multi-dimensional classification (domain, category, level, unit...)
  - Confidence-calibrated concept associations
  - Proportional weighting for direct and reverse relationships
  - Proximity-weighted path scoring (rewards filesystem adjacency as a proxy for structural organization)
+
+## Optional Hub Frontmatter (relation labels and names)
+
+Hubs can define three optional, cosmetic frontmatter fields used for display labels and naming. They do not affect matching logic; they only control wording in UI output.
+
+- name-canonical: Preferred plural or human-facing name for the hub’s category. Falls back to the Hub file name if omitted.
+- relation-incoming: Label used when showing relationships pointing to this category (e.g., "Directed by").
+- relation-outgoing: Label used when showing relationships from this category (e.g., "Directed").
+
+Resolution order in code:
+- Display names come from name-canonical when present; otherwise the Hub file name.
+- Relation labels are fetched from the matching Hub for the same subject and domain-category; if missing, we fall back to the display name.
+
+Examples (from sample project):
+
+```yaml
+---
+type: hub
+domain: concepts
+subject: Sample Project
+domain-category: director
+name-canonical: Directors
+relation-incoming: Directed by
+relation-outgoing: Directed
+---
+```
+
+```yaml
+---
+type: hub
+domain: concepts
+subject: Sample Project
+domain-category: actor
+name-canonical: Actors
+relation-incoming: Actors
+relation-outgoing: Acted in
+---
+```
 
 ## The Game Changer: Smarter Wrapper (Zero‑Config)
 
@@ -46,6 +84,10 @@ ConceptWrappers.renderSmarterView(dv);
 - **Future-Proof**: All parameters pass through to `getRelatedConcepts()`, ensuring compatibility with future updates
 
 The script adapts to the page it's running in, automatically using the page's metadata to determine relationships and content, making it truly self-contained and maintenance-free.
+
+## Contextual Activation: Neural Graph, Scoped
+
+Contextual Activation makes the vault behave like a neural graph: selecting a context “lights up” the relevant subset of notes and edges while other areas remain inactive for discovery. Discovery and scoring operate strictly within this activated subset. Learn more: [docs/010-Contextual-Activation.md](docs/100-Contextual-Activation.md).
 
 ## Installation
 
@@ -245,6 +287,12 @@ Distance: 4 hops
     - Flexible beyond the basics: once the shared vocabulary is present, you can match on any additional frontmatter fields and extend groups/categories via config
     - Reference implementation: a [Sample Project](https://github.com/pequet/project-sample) repository (coming soon) will showcase the expected frontmatter and config layout
 
+## The Concept Manager Ecosystem
+
+- **[Subject Index Cache](https://github.com/pequet/obsidian-subject-index-cache)** - Lightning-fast caching layer
+- **[Concept Manager](https://github.com/pequet/obsidian-concept-manager)** - Core relationship discovery engine (this project)
+- **[Sample Project](https://github.com/pequet/project-sample)** - Turn-key implementation and examples
+ 
 ## License
 
 This project is licensed under the MIT License.
