@@ -4450,23 +4450,112 @@ class ConceptManager {
                 return a.concept.file.name.localeCompare(b.concept.file.name);
             });
 
-        console.log(`[SIC] 📊 Found ${related.length} related concepts, ${filteredResults.length} after filtering`);
+        console.log(`[SIC] 📊 Found ${related.length} related concepts, ${filteredResults.length} after basic filtering`);
+        
+        // *** SMART FILTERING (same logic as getRelatedConcepts) ***
+        stepCounter++;
+        dv.paragraph(`**CACHED Step ${stepCounter}: Smart Filtering (same parameters as legacy getRelatedConcepts)**`);
+        
+        // Smart filtering parameters (same defaults as getRelatedConcepts)
+        const minScore = 0.5; // 50% minimum confidence
+        const minResults = 5; // minimum 5 results
+        const strictMinResults = true; // lower confidence threshold if needed
+        const maxResults = 10; // maximum 10 results
+        const strictMaxResults = false; // extend for tied scores
+        
+        dv.paragraph(`  • Minimum confidence: ${(minScore * 100).toFixed(1)}%`);
+        dv.paragraph(`  • Min results: ${minResults} (strict: ${strictMinResults})`);
+        dv.paragraph(`  • Max results: ${maxResults} (strict: ${strictMaxResults})`);
+        dv.paragraph("---");
+        
+        // Pre-sorted results (already sorted by confidence desc, then path distance asc, then alphabetical)
+        const preSortedResults = filteredResults;
+        
+        // Calculate adaptive minScore if needed (same as getRelatedConcepts)
+        let adaptiveMinScore = minScore;
+        if (strictMinResults) {
+            // Check how many results we'd get with current minScore
+            const currentResults = preSortedResults.filter(r => r.confidence >= minScore * 100);
+            
+            if (currentResults.length < minResults && preSortedResults.length >= minResults) {
+                // We need to lower the threshold
+                // Find the score that would give us at least minResults
+                const targetScore = preSortedResults[minResults - 1].confidence;
+                // Don't go below 10% minimum
+                adaptiveMinScore = Math.max(0.1, targetScore / 100);
+                
+                dv.paragraph(`**CACHED: Adaptive MinScore:** Lowered from ${(minScore * 100).toFixed(1)}% to ${(adaptiveMinScore * 100).toFixed(1)}% to reach minResults=${minResults}`);
+                console.log(`[SIC] 📉 Adaptive threshold: ${(minScore * 100).toFixed(1)}% → ${(adaptiveMinScore * 100).toFixed(1)}% to get ${minResults} results`);
+            }
+        }
+        
+        // Apply the (possibly adapted) minimum score threshold
+        const scoreFilteredResults = preSortedResults.filter(r => r.confidence >= adaptiveMinScore * 100);
+        dv.paragraph(`**CACHED: After confidence threshold (${(adaptiveMinScore * 100).toFixed(1)}%):** ${scoreFilteredResults.length} results`);
+        
+        // Apply max results limit with optional strict mode (same as getRelatedConcepts)
+        let smartFilteredResults;
+        if (strictMaxResults) {
+            // Strict mode: simply cut off at maxResults
+            smartFilteredResults = scoreFilteredResults.slice(0, maxResults);
+            dv.paragraph(`**CACHED: Strict max results:** Limited to exactly ${maxResults} results`);
+        } else {
+            // Non-strict mode: include all results with same confidence as the last included result
+            if (scoreFilteredResults.length <= maxResults) {
+                smartFilteredResults = scoreFilteredResults;
+                dv.paragraph(`**CACHED: Below max results:** All ${scoreFilteredResults.length} results included`);
+            } else {
+                // Get initial results up to maxResults
+                smartFilteredResults = scoreFilteredResults.slice(0, maxResults);
+                
+                // Get the confidence score of the last included result
+                const lastIncludedScore = smartFilteredResults[smartFilteredResults.length - 1].confidence;
+                
+                // Continue adding results that have the same confidence score
+                let addedTies = 0;
+                for (let i = maxResults; i < scoreFilteredResults.length; i++) {
+                    if (scoreFilteredResults[i].confidence === lastIncludedScore) {
+                        smartFilteredResults.push(scoreFilteredResults[i]);
+                        addedTies++;
+                    } else {
+                        // Once we hit a different score, stop
+                        break;
+                    }
+                }
+                
+                if (addedTies > 0) {
+                    dv.paragraph(`**CACHED: Tie extension:** Added ${addedTies} more results with same confidence (${lastIncludedScore.toFixed(1)}%) as result #${maxResults}`);
+                    console.log(`[SIC] 🔗 Extended for ties: +${addedTies} results at ${lastIncludedScore.toFixed(1)}%`);
+                } else {
+                    dv.paragraph(`**CACHED: No ties:** Exactly ${maxResults} results (next result has different confidence)`);
+                }
+            }
+        }
+        
+        dv.paragraph(`**CACHED: Smart filtering complete:** ${preSortedResults.length} → ${scoreFilteredResults.length} → ${smartFilteredResults.length} results`);
+        dv.paragraph("---");
+        
+        // Update filteredResults to use smart filtered results
+        const finalFilteredResults = smartFilteredResults;
         
         // Debug: Show final order for comparison with legacy
-        console.log(`[SIC] 📋 FINAL ORDER:`);
-        filteredResults.slice(0, 10).forEach((r, index) => {
+        console.log(`[SIC] 📋 FINAL ORDER (${finalFilteredResults.length} results after smart filtering):`);
+        finalFilteredResults.slice(0, 10).forEach((r, index) => {
             console.log(`[SIC]   ${index + 1}. ${r.concept.file.name} - ${r.confidence.toFixed(1)}% (path=${r.pathDistance}, subject=${r.concept.subject})`);
         });
         
         // Always show debug info for A-B testing
-        dv.paragraph(`**CACHED: Found ${related.length} related concepts, ${filteredResults.length} after filtering**`);
+        dv.paragraph(`**CACHED: Final Results Summary:**`);
+        dv.paragraph(`  • Total concepts found: ${related.length}`);
+        dv.paragraph(`  • After basic filtering: ${filteredResults.length}`);
+        dv.paragraph(`  • After smart filtering: ${finalFilteredResults.length}`);
         dv.paragraph(`**CACHED: Final Order (first 10):**`);
-        filteredResults.slice(0, 10).forEach((r, index) => {
+        finalFilteredResults.slice(0, 10).forEach((r, index) => {
             dv.paragraph(`  ${index + 1}. ${r.concept.file.name} - ${r.confidence.toFixed(1)}% (${r.concept.subject})`);
         });
-        if (filteredResults.length > 0) {
-            dv.paragraph(`**CACHED: First 5 results:**`);
-            filteredResults.slice(0, 5).forEach(r => {
+        if (finalFilteredResults.length > 0) {
+            dv.paragraph(`**CACHED: First 5 results with detailed scores:**`);
+            finalFilteredResults.slice(0, 5).forEach(r => {
                 // Separate field scores into regular, reverse, and forward for clarity
                 const regularFields = [];
                 const reverseFields = [];
@@ -4495,10 +4584,10 @@ class ConceptManager {
         }
         
         // Show distance breakdown like legacy
-        if (related.length > 0) {
-            dv.paragraph(`**CACHED: Distance breakdown:**`);
+        if (finalFilteredResults.length > 0) {
+            dv.paragraph(`**CACHED: Distance breakdown (final results only):**`);
             const distanceGroups = {};
-            related.forEach(r => {
+            finalFilteredResults.forEach(r => {
                 if (!distanceGroups[r.pathDistance]) distanceGroups[r.pathDistance] = [];
                 distanceGroups[r.pathDistance].push(r.concept.file.name);
             });
@@ -4519,15 +4608,15 @@ class ConceptManager {
         // Display related concepts section
         dv.header(headerLevel, "Related Content");
 
-        if (filteredResults.length === 0) {
-            dv.paragraph("No related \"CONCEPTS\" found.");
+        if (finalFilteredResults.length === 0) {
+            dv.paragraph("No related \"CONCEPTS\" found after smart filtering.");
         } else {
             // Include Subject column if results span multiple subjects (within the subjectsToUse filter)
-            const uniqueSubjects = Array.from(new Set(filteredResults.map(r => r.concept.subject).filter(Boolean)));
+            const uniqueSubjects = Array.from(new Set(finalFilteredResults.map(r => r.concept.subject).filter(Boolean)));
             const includeSubjectColumn = uniqueSubjects.length > 1;
 
             const headers = ["Name", "Type", "Domain", "Confidence", ...(includeSubjectColumn ? ["Subject"] : [])];
-            const rows = filteredResults.map(r => [
+            const rows = finalFilteredResults.map(r => [
                 dv.fileLink(r.concept.file.path, false, r.concept.file.name),
                 r.concept.type || "",
                 r.concept.domain || "",  
@@ -4542,7 +4631,7 @@ class ConceptManager {
         const buildTime = Math.round(__methodEnd - __buildStart);
         console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
         console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-        console.log(`[SIC] ✅ Cached Related Content completed in ${buildTime}ms`);
+        console.log(`[SIC] ✅ Cached Related Content completed in ${buildTime}ms with ${finalFilteredResults.length} results`);
 
         if (showTimestamp) {
             this._renderTimestamp({ dv, label: 'CACHED Rendered at', durationMs: showTimeBuild ? buildTime : null });
@@ -4754,7 +4843,14 @@ class ConceptManager {
      * });
      * ```
      */
-     generateSmartView({ dv, headerLevel = 2, enabledSteps = ['cachePrep', 'contentClassifications_legacy', 'contentClassifications', 'keyConnections_legacy', 'keyConnections', 'relatedContent_legacy', 'relatedContent', 'relatedHubs_legacy', 'relatedHubs'], debug = false, showTimestamp = true, showTimeBuild = true }) {
+     generateSmartView({ 
+        dv, 
+        headerLevel = 2, 
+        enabledSteps = ['cachePrep', 'contentClassifications_legacy', 'contentClassifications', 'keyConnections_legacy', 'keyConnections', 'relatedContent_legacy', 'relatedContent', 'relatedHubs_legacy', 'relatedHubs'], 
+        debug = false, 
+        showTimestamp = true, 
+        showTimeBuild = true 
+    }) {
         try {
             if (debug) {
                 dv.header(headerLevel, "🔬 Smart View Generator - Debug Mode");
