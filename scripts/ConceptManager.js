@@ -532,7 +532,7 @@ class ConceptManager {
         includePath = true, 
         strictPath = false, 
         minScore = 0.5, 
-        minResults = 5,
+        minResults = 6,
         strictMinResults = true,
         maxResults = 10, 
         strictMaxResults = false,
@@ -1229,8 +1229,8 @@ class ConceptManager {
                 // We need to lower the threshold
                 // Find the score that would give us at least minResults
                 const targetScore = preSortedResults[minResults - 1].confidence;
-                // Don't go below 10% minimum
-                adaptiveMinScore = Math.max(0.1, targetScore / 100);
+                // Don't go below 5% minimum
+                adaptiveMinScore = Math.max(0.05, targetScore / 100);
                 
                 if (debug) {
                     dv.paragraph(`**Adaptive MinScore:** Lowered from ${(minScore * 100).toFixed(1)}% to ${(adaptiveMinScore * 100).toFixed(1)}% to reach minResults=${minResults}`);
@@ -4458,7 +4458,7 @@ class ConceptManager {
         
         // Smart filtering parameters (same defaults as getRelatedConcepts)
         const minScore = 0.5; // 50% minimum confidence
-        const minResults = 5; // minimum 5 results
+        const minResults = 6; // minimum 6 results
         const strictMinResults = true; // lower confidence threshold if needed
         const maxResults = 10; // maximum 10 results
         const strictMaxResults = false; // extend for tied scores
@@ -4481,8 +4481,8 @@ class ConceptManager {
                 // We need to lower the threshold
                 // Find the score that would give us at least minResults
                 const targetScore = preSortedResults[minResults - 1].confidence;
-                // Don't go below 10% minimum
-                adaptiveMinScore = Math.max(0.1, targetScore / 100);
+                // Don't go below 5% minimum
+                adaptiveMinScore = Math.max(0.05, targetScore / 100);
                 
                 dv.paragraph(`**CACHED: Adaptive MinScore:** Lowered from ${(minScore * 100).toFixed(1)}% to ${(adaptiveMinScore * 100).toFixed(1)}% to reach minResults=${minResults}`);
                 console.log(`[SIC] 📉 Adaptive threshold: ${(minScore * 100).toFixed(1)}% → ${(adaptiveMinScore * 100).toFixed(1)}% to get ${minResults} results`);
