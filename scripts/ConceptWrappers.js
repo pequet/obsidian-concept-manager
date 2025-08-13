@@ -238,7 +238,15 @@ class ConceptWrappers {
      * @param {boolean} [options.showTimeBuild=true] - Pass-through to ConceptManager.
      */
      renderSmarterView(dv, { 
-        sections = ['cachePrep', 'relatedContent_legacy', 'relatedContent'], // 'contentClassifications_legacy', 'contentClassifications', 'keyConnections_legacy', 'keyConnections', ... , 'relatedHubs_legacy', 'relatedHubs'
+        // NOTE: These section identifiers MUST match ConceptManager.SECTION_IDENTIFIERS
+        // See ConceptManager class for canonical list and documentation
+        sections = [
+            'cachePrep', 
+            'contentClassifications', 
+            'keyConnections', 
+            'relatedContent', 
+            'relatedHubs'
+        ], 
         headerLevel = 2, 
         concurrency = 1, 
         prioritySections = [], 
@@ -257,13 +265,9 @@ class ConceptWrappers {
         const makeKey = (section) => `${sourcePath}::${section}::h${headerLevel}`;
         const SECTION_LABELS = {
             cachePrep: 'Cache Preparation',
-            contentClassifications_legacy: 'LEGACY Classifications',
             contentClassifications: 'Classifications',
-            keyConnections_legacy: 'LEGACY Key Connections',
             keyConnections: 'Key Connections',
-            relatedContent_legacy: 'LEGACY Related Content',
             relatedContent: 'Related Content',
-            relatedHubs_legacy: 'LEGACY Related Hubs',
             relatedHubs: 'Related Hubs'
         };
         if (debug && console && console.log) {
