@@ -994,8 +994,7 @@ class ConceptManager {
             stepCounter++;
         }
         
-        // *** SECTION 4: FORWARD RELATIONSHIP LOOKUP (DISABLED FOR DEBUGGING) ***
-        /*
+        // *** SECTION 4: FORWARD RELATIONSHIP LOOKUP (ENABLED) ***
         // FORWARD RELATIONSHIP LOOKUP: Award points when the CURRENT page references candidates by name
         // Example: On a Film page, "group-film-director: John Waters" or "group-film-actor: John Waters"
         // should give points to the Person page(s) whose domain-category includes "film-director" or "film-actor" respectively.
@@ -1090,7 +1089,6 @@ class ConceptManager {
                 stepCounter++;
             }
         }
-        */
         
         // Calculate final scores
         if (debug) {
@@ -4236,6 +4234,122 @@ class ConceptManager {
             stepCounter++;
         }
 
+        // *** SECTION 4: FORWARD RELATIONSHIP LOOKUP (ENABLED) - Same logic as legacy ***
+        const forwardScoreMultiplier = 3.0; // Same as legacy
+        
+        // Get current page's group-* fields (same as legacy)
+        const currentGroupFields = Object.keys(currentPage).filter(k => k.startsWith('group-') && currentPage[k]);
+        if (currentGroupFields.length > 0) {
+            dv.paragraph(`**CACHED Step ${stepCounter}: Forward relationship lookup (current → others)**`);
+            dv.paragraph(`  • Current group fields: [${currentGroupFields.join(', ')}]`);
+            dv.paragraph(`  • Score per forward reference: ${forwardScoreMultiplier} points`);
+            dv.paragraph(`  • Logic: Find pages whose name matches current page's group field values AND have expected domain-category`);
+            dv.paragraph("---");
+            
+            console.log(`[SIC] ➡️ Step ${stepCounter}: Forward relationship lookup (current → others)`);
+            console.log(`[SIC]   • Current group fields: [${currentGroupFields.join(', ')}]`);
+            
+            currentGroupFields.forEach(groupFieldName => {
+                // Validate this group field against config (same as legacy)
+                const validation = this.isValidGroupField({ 
+                    groupFieldName, 
+                    validFilters: config.validFilters 
+                });
+
+                if (!validation.isValid) {
+                    dv.paragraph(`⚠️ Skipping forward lookup for invalid group field: ${validation.reason}`);
+                    console.log(`[SIC] ⚠️ Skipping forward lookup for invalid group field: ${validation.reason}`);
+                    return;
+                }
+
+                const entityNames = this.normalizeValues(currentPage[groupFieldName]);
+                const expectedCategory = validation.filterName; // e.g., film-director, film-actor, cinema-theme
+
+                dv.paragraph(`**CACHED FORWARD LOOKUP QUERY (${groupFieldName}):**`);
+                dv.paragraph(`  • Values on current page: [${entityNames.join(', ')}]`);
+                dv.paragraph(`  • Looking for cached pages whose file name matches any of these values`);
+                dv.paragraph(`  • And whose domain-category includes: "${expectedCategory}"`);
+                
+                console.log(`[SIC]   🔍 Forward lookup for ${groupFieldName}`);
+                console.log(`[SIC]     • Values: [${entityNames.join(', ')}]`);
+                console.log(`[SIC]     • Expected category: "${expectedCategory}"`);
+
+                let totalForwardMatches = 0;
+                entityNames.forEach(nameValue => {
+                    const nameValueLower = String(nameValue).toLowerCase();
+                    
+                    // Find matching pages from cache (equivalent to legacy's dv.pages() query)
+                    let matchCount = 0;
+                    eligiblePages.forEach(cachedPage => {
+                        const page = cachedPage._page;
+                        
+                        // Must have domain-category including the expected category (same as legacy)
+                        if (!page['domain-category']) return;
+                        const cats = this.normalizeValues(page['domain-category']);
+                        if (!cats.includes(expectedCategory)) return;
+
+                        // Name match against page file name (case-insensitive, substring tolerant - same as legacy)
+                        const pageNameLower = String(page.file.name).toLowerCase();
+                        if (!pageNameLower.includes(nameValueLower)) return;
+                        
+                        // Found a match!
+                        const conceptId = page.file.path;
+                        
+                        // Find existing entry in related array
+                        let existingEntry = related.find(r => r.concept.file.path === conceptId);
+                        if (!existingEntry) {
+                            // This page wasn't included in previous sections, so create new entry
+                            existingEntry = {
+                                concept: page,
+                                confidence: 0,
+                                pathDistance: 999, // No path proximity
+                                pathScore: 0,
+                                fieldScores: new Map()
+                            };
+                            related.push(existingEntry);
+                            console.log(`[SIC]     → NEW ENTRY: ${page.file.name} (forward reference only)`);
+                        }
+                        
+                        // Award points for the forward reference from current page (same as legacy)
+                        const key = `${groupFieldName}-forward`;
+                        existingEntry.fieldScores.set(key, forwardScoreMultiplier);
+                        
+                        matchCount++;
+                        totalForwardMatches++;
+                        console.log(`[SIC]     → ${page.file.name}: name matches "${nameValue}" AND domain-category includes "${expectedCategory}" = ${forwardScoreMultiplier} points`);
+                    });
+                    
+                    if (matchCount > 0) {
+                        dv.paragraph(`  • Found ${matchCount} cached page(s) referenced by current.${groupFieldName} containing "${nameValue}":`);
+                        // Show matching pages in debug output
+                        eligiblePages.forEach(cachedPage => {
+                            const page = cachedPage._page;
+                            if (!page['domain-category']) return;
+                            const cats = this.normalizeValues(page['domain-category']);
+                            if (!cats.includes(expectedCategory)) return;
+                            const pageNameLower = String(page.file.name).toLowerCase();
+                            if (pageNameLower.includes(nameValueLower)) {
+                                dv.paragraph(`    - ${page.file.name} (domain-category includes "${expectedCategory}")`);
+                            }
+                        });
+                    }
+                });
+                
+                dv.paragraph(`**CACHED FORWARD LOOKUP RESULTS:**`);
+                dv.paragraph(`  • Found ${totalForwardMatches} total forward reference matches for ${groupFieldName}`);
+                if (totalForwardMatches > 0) {
+                    dv.paragraph(`  • Each gets ${forwardScoreMultiplier} points for being referenced by current page`);
+                }
+                dv.paragraph("---");
+                
+                console.log(`[SIC]     • Total matches for ${groupFieldName}: ${totalForwardMatches}`);
+            });
+            
+            dv.paragraph(`**CACHED: Forward lookup complete.**`);
+            dv.paragraph("---");
+            stepCounter++;
+        }
+
         // *** CALCULATE FINAL SCORES (same logic as legacy) ***
         dv.paragraph(`**CACHED Step ${stepCounter}: Calculating final scores**`);
         dv.paragraph(`  • Total concepts found: ${related.length}`);
@@ -4268,6 +4382,22 @@ class ConceptManager {
                 if (validation.isValid) {
                     totalMaxPossible += reverseScoreMultiplier;
                     dv.paragraph(`    - ${groupFieldName}-reverse: ${reverseScoreMultiplier} pts`);
+                }
+            });
+        }
+        
+        // Add potential forward relationship points (same as legacy)
+        const currentGroupFieldsForMax = Object.keys(currentPage).filter(k => k.startsWith('group-') && currentPage[k]);
+        if (currentGroupFieldsForMax.length > 0) {
+            dv.paragraph(`  • Max possible forward relationship scores:`);
+            currentGroupFieldsForMax.forEach(groupFieldName => {
+                const validation = this.isValidGroupField({ 
+                    groupFieldName, 
+                    validFilters: config.validFilters 
+                });
+                if (validation.isValid) {
+                    totalMaxPossible += forwardScoreMultiplier;
+                    dv.paragraph(`    - ${groupFieldName}-forward: ${forwardScoreMultiplier} pts`);
                 }
             });
         }
@@ -4337,14 +4467,17 @@ class ConceptManager {
         if (filteredResults.length > 0) {
             dv.paragraph(`**CACHED: First 5 results:**`);
             filteredResults.slice(0, 5).forEach(r => {
-                // Separate field scores into regular and reverse for clarity
+                // Separate field scores into regular, reverse, and forward for clarity
                 const regularFields = [];
                 const reverseFields = [];
+                const forwardFields = [];
                 
                 if (r.fieldScores) {
                     Array.from(r.fieldScores.entries()).forEach(([field, score]) => {
                         if (field.endsWith('-reverse')) {
                             reverseFields.push(`${field}=${score}`);
+                        } else if (field.endsWith('-forward')) {
+                            forwardFields.push(`${field}=${score}`);
                         } else {
                             regularFields.push(`${field}=${score}`);
                         }
@@ -4353,9 +4486,11 @@ class ConceptManager {
                 
                 const fieldScoresText = regularFields.length > 0 ? regularFields.join(', ') : 'none';
                 const reverseScoresText = reverseFields.length > 0 ? reverseFields.join(', ') : 'none';
+                const forwardScoresText = forwardFields.length > 0 ? forwardFields.join(', ') : 'none';
                 
                 dv.paragraph(`  • ${r.concept.file.name} (${r.concept.subject}, ${r.concept.domain}, ${r.concept.type}) - ${r.confidence.toFixed(1)}%`);
-                dv.paragraph(`    - path=${r.pathScore?.toFixed(2) || 0}, fields: ${fieldScoresText}, reverse: ${reverseScoresText}`);
+                dv.paragraph(`    - path=${r.pathScore?.toFixed(2) || 0}, fields: ${fieldScoresText}`);
+                dv.paragraph(`    - reverse: ${reverseScoresText}, forward: ${forwardScoresText}`);
             });
         }
         
