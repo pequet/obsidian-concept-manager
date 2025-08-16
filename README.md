@@ -5,9 +5,9 @@ This is a CustomJS Class designed for **advanced content discovery** and **workf
 ## Features
 
  - Dynamic concept relationship mapping
- - Contextual Activation (scope-aware) lights up only context‑relevant regions for discovery and traversal. See: [Contextual Activation](docs/100-Contextual-Activation.md).
+ - Contextual Activation (scope-aware) lights up the relevant subset of notes and edges while other areas remain inactive for discovery and traversal
  - Bidirectional relationship discovery (forward and reverse references)
- - Multi-dimensional classification (domain, category, level, unit...)
+ - Open-ended multi-dimensional classification (domain, category, level, unit...)
  - Confidence-calibrated concept associations
  - Proportional weighting for direct and reverse relationships
  - Proximity-weighted path scoring (rewards filesystem adjacency as a proxy for structural organization)
