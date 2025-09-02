@@ -1420,6 +1420,853 @@ class ConceptManager {
     }
 
     /**
+     * Helper to exclude archived paths
+     * @param {Object} p - Page object
+     * @returns {boolean} True if page is in archived path
+     */
+    _isArchivedPath(p) {
+        const path = String(p.file.path).toLowerCase();
+        return path.includes('/archives/') || path.includes('/4. archives/');
+    }
+
+    /**
+     * Helper to get current page subject with fallback strategies
+     * @param {Object} dv - Dataview API object
+     * @returns {string|null} The current page subject or null if not found
+     */
+    _getCurrentPageSubject(dv) {
+        const currentPage = dv.current();
+        let currentSubject = null;
+
+        // Try to get the actual current page subject
+        if (currentPage && currentPage.subject) {
+            currentSubject = currentPage.subject;
+        } else {
+            // Alternative method: try to find this specific file by name pattern
+            const currentFileName = currentPage?.file?.name;
+            if (currentFileName) {
+                const thisFile = dv.pages().where(p => p.file.name === currentFileName).first();
+                if (thisFile && thisFile.subject) {
+                    currentSubject = thisFile.subject;
+                }
+            }
+        }
+
+        return currentSubject;
+    }
+
+    /**
+     * Helper to convert field name to display name
+     * @param {string} fieldName - The field name to convert
+     * @returns {string} Display-friendly field name
+     */
+    _getFieldDisplayName(fieldName) {
+        return fieldName.split('-').map(word => 
+            word.charAt(0).toUpperCase() + word.slice(1)
+        ).join(' ');
+    }
+
+    /**
+     * Helper to find master validation file for a field
+     * @param {Object} dv - Dataview API object
+     * @param {string} currentSubject - Current page subject
+     * @param {string} fieldName - Field name to find validation for
+     * @returns {Object|null} Master validation file or null if not found
+     */
+    _findMasterValidationFile(dv, currentSubject, fieldName) {
+        return dv.pages()
+            .where(p => 
+                p.subject === currentSubject &&
+                (p.domain === "knowledge-organization" || p.domain === "methods") &&
+                p["validates-field"] === fieldName
+            )
+            .first();
+    }
+    
+    /**
+     * Helper to find master validation file for General (Core) subject
+     * @param {Object} dv - Dataview API object
+     * @param {string} fieldName - Field name to find validation for
+     * @returns {Object|null} General master validation file or null if not found
+     */
+    _findGeneralMasterValidationFile(dv, fieldName) {
+        return dv.pages()
+            .where(p => 
+                p.subject === "General" &&
+                (p.domain === "knowledge-organization" || p.domain === "methods") &&
+                p["validates-field"] === fieldName
+            )
+            .first();
+    }
+
+    /**
+     * Helper to parse approved categories from master validation file
+     * @param {Object} masterCategoriesFile - Master validation file object
+     * @param {Object} dv - Dataview API object
+     * @returns {Object} Object with approved categories array and definitions map
+     */
+    async _parseApprovedCategories(masterCategoriesFile, dv) {
+        const approvedCategories = [];
+        const categoryDefinitions = new Map();
+        
+        if (!masterCategoriesFile) {
+            return { approvedCategories, categoryDefinitions };
+        }
+
+        // Parse the markdown tables to extract category names
+        let fileContent = null;
+        try {
+            // Use app.vault.cachedRead with proper async handling
+            const file = app.vault.getAbstractFileByPath(masterCategoriesFile.file.path);
+            if (file) {
+                fileContent = await app.vault.cachedRead(file);
+            } else {
+                // Alternative: try to read the file contents using dv.io.load
+                try {
+                    fileContent = dv.io.load(masterCategoriesFile.file.path);
+                    // If dv.io.load returns a Promise, await it
+                    if (fileContent && typeof fileContent.then === 'function') {
+                        fileContent = await fileContent;
+                    }
+                } catch (ioError) {
+                    fileContent = null;
+                }
+            }
+        } catch (error) {
+            fileContent = null;
+        }
+        
+        if (fileContent && typeof fileContent === 'string') {
+            // Look for category names in backticks in the table rows
+            const lines = fileContent.split('\n');
+            lines.forEach(line => {
+                // Match lines that contain category definitions with backticks
+                // Format: | `category-name` | Definition text | Usage context |
+                const fullMatch = line.match(/^\|\s*`([^`]+)`\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/);
+                if (fullMatch) {
+                    const category = fullMatch[1].trim();
+                    const definition = fullMatch[2].trim();
+                    const usageContext = fullMatch[3].trim();
+                    
+                    if (category && category !== 'Category') {
+                        approvedCategories.push(category);
+                        categoryDefinitions.set(category, {
+                            definition: definition,
+                            usageContext: usageContext
+                        });
+                    }
+                } else {
+                    // Fallback to simple category match for backwards compatibility
+                    const categoryMatch = line.match(/^\|\s*`([^`]+)`\s*\|/);
+                    if (categoryMatch) {
+                        const category = categoryMatch[1].trim();
+                        if (category && category !== 'Category') {
+                            approvedCategories.push(category);
+                            // Add a placeholder definition if not found above
+                            if (!categoryDefinitions.has(category)) {
+                                categoryDefinitions.set(category, {
+                                    definition: "Validated category",
+                                    usageContext: "Various"
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        return { approvedCategories, categoryDefinitions };
+    }
+
+    /**
+     * Helper function to gather and analyze category data for functional organization views
+     * @param {Object} dv - Dataview API object
+     * @param {string} fieldName - Field name to analyze (e.g., 'domain-category')
+     * @param {string} currentSubject - Current page subject for filtering
+     * @returns {Object} Object containing categoryMap, approvedCategories, categoryDefinitions, masterCategoriesFile, pages, repoRoot
+     */
+    async _gatherCategoryData(dv, fieldName, currentSubject) {
+        // Get approved categories from master validation file
+        const masterCategoriesFile = this._findMasterValidationFile(dv, currentSubject, fieldName);
+        const { approvedCategories, categoryDefinitions } = await this._parseApprovedCategories(masterCategoriesFile, dv);
+        
+        // Get General (Core) approved categories for cross-reference
+        const generalMasterFile = this._findGeneralMasterValidationFile(dv, fieldName);
+        const { approvedCategories: generalApprovedCategories = [], categoryDefinitions: generalCategoryDefinitions = new Map() } = 
+            await this._parseApprovedCategories(generalMasterFile, dv);
+            
+        // Get all pages with matching subject, excluding archives
+        const pages = dv.pages()
+            .where(p => !this._isArchivedPath(p) && p.subject === currentSubject);
+
+        // Get config file to determine root path for trimming
+        const configFile = dv.pages()
+            .where(p => p.type === "config")
+            .first();
+
+        let repoRoot = "";
+        if (configFile) {
+            const pathParts = configFile.file.path.split('/');
+            repoRoot = pathParts.slice(0, 2).join('/');
+        }
+
+        // Initialize and collect all field values with their associated files
+        const categoryMap = new Map();
+
+        pages.forEach(p => {
+            const categories = p[fieldName];
+            if (categories) {
+                const categoryArray = Array.isArray(categories) ? categories : [categories];
+                
+                categoryArray.forEach(cat => {
+                    if (!categoryMap.has(cat)) {
+                        categoryMap.set(cat, []);
+                    }
+                    categoryMap.get(cat).push({
+                        link: p.file.link,
+                        path: p.file.path,
+                        page: p
+                    });
+                });
+            }
+        });
+
+        return {
+            categoryMap,
+            approvedCategories,
+            generalApprovedCategories,
+            categoryDefinitions,
+            generalCategoryDefinitions,
+            masterCategoriesFile,
+            generalMasterFile,
+            pages,
+            repoRoot
+        };
+    }
+
+    /**
+     * Helper function to organize categories by namespace
+     * @param {Map} categoryMap - Map of categories to files
+     * @param {Array} approvedCategories - Array of approved category names
+     * @returns {Map} Map of namespaces to categories
+     */
+    _organizeCategoriesByNamespace(categoryMap, approvedCategories, generalApprovedCategories = []) {
+        const namespaces = new Map();
+
+        Array.from(categoryMap.keys()).forEach(cat => {
+            const files = categoryMap.get(cat);
+            const isProjectValid = approvedCategories.includes(cat);
+            const isGeneralValid = generalApprovedCategories.includes(cat);
+            
+            // Set indicator based on validation: project-specific, Core Framework, or needs validation
+            let indicator;
+            if (isProjectValid) {
+                indicator = '✅'; // Validated in this project
+            } else if (isGeneralValid) {
+                indicator = '🔄'; // Core Framework category
+            } else {
+                indicator = '❓'; // Needs validation
+            }
+            
+            // Extract namespace from category name
+            let namespace = 'other';
+            if (cat.includes('-')) {
+                const prefix = cat.split('-')[0];
+                namespace = prefix;
+            }
+            
+            if (!namespaces.has(namespace)) {
+                namespaces.set(namespace, []);
+            }
+            
+            namespaces.get(namespace).push({ 
+                name: cat, 
+                files: files,
+                indicator: indicator 
+            });
+        });
+
+        // Sort categories within each namespace by file count (descending)
+        for (let [ns, categories] of namespaces) {
+            categories.sort((a, b) => b.files.length - a.files.length);
+        }
+
+        return namespaces;
+    }
+
+    /**
+     * Helper function to render debug information
+     * @param {Object} dv - Dataview API object
+     * @param {string} currentSubject - Current page subject
+     * @param {string} fieldName - Field name being analyzed
+     * @param {Object} masterCategoriesFile - Master validation file (or null)
+     * @param {Array} approvedCategories - Array of approved categories
+     */
+    _renderDebugInfo(dv, currentSubject, fieldName, masterCategoriesFile, approvedCategories) {
+        dv.header(3, "🐛 DEBUG: Functional Organization Analysis");
+        dv.paragraph(`**Current Subject:** "${currentSubject}"`);
+        dv.paragraph(`**Looking for field validation:** "${fieldName}"`);
+        dv.paragraph(`**Master Categories File:** ${masterCategoriesFile ? 'Found' : 'Not Found'}`);
+        if (masterCategoriesFile) {
+            dv.paragraph(`**Master Categories File Path:** ${masterCategoriesFile.file.path}`);
+        } else {
+            dv.paragraph("**Master File Search Failed - Frontmatter criteria not met:**");
+            
+            // Check each condition separately using frontmatter
+            const subjectMatches = dv.pages().where(p => p.subject === currentSubject);
+            dv.paragraph(`  • Files with subject=${currentSubject}: ${subjectMatches.length}`);
+            
+            const domainMatches = dv.pages().where(p => p.subject === currentSubject && 
+                (p.domain === "knowledge-organization" || p.domain === "methods"));
+            dv.paragraph(`  • Files with subject + domain: ${domainMatches.length}`);
+            
+            const validatesFieldMatches = dv.pages().where(p => p.subject === currentSubject && 
+                (p.domain === "knowledge-organization" || p.domain === "methods") &&
+                p["validates-field"] === fieldName);
+            dv.paragraph(`  • Files with all criteria + validates-field match: ${validatesFieldMatches.length}`);
+            
+            // Show what we actually found
+            if (domainMatches.length > 0) {
+                dv.paragraph("**Found files with matching subject + domain:**");
+                domainMatches.forEach(f => {
+                    const validatesFieldMatch = f["validates-field"] === fieldName;
+                    dv.paragraph(`    • ${f.file.name} (domain: "${f.domain}", validates-field match: ${validatesFieldMatch})`);
+                    dv.paragraph(`      validates-field: "${f["validates-field"]}"`);
+                });
+            }
+        }
+        dv.paragraph(`**Approved Categories:** ${approvedCategories.length} loaded`);
+    }
+
+    /**
+     * Helper function to render summary statistics
+     * @param {Object} dv - Dataview API object
+     * @param {Map} categoryMap - Map of categories to files
+     * @param {Array} approvedCategories - Array of approved categories
+     * @param {string} fieldName - Field name being analyzed
+     */
+    _renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories = []) {
+        const totalCategories = Array.from(categoryMap.keys()).length;
+        const projectValidCategories = Array.from(categoryMap.keys()).filter(cat => approvedCategories.includes(cat)).length;
+        const generalValidCategories = Array.from(categoryMap.keys()).filter(cat => !approvedCategories.includes(cat) && generalApprovedCategories.includes(cat)).length;
+        const validCategories = projectValidCategories + generalValidCategories;
+        const needsReview = totalCategories - validCategories;
+        
+        dv.paragraph(`**Total Categories:** ${totalCategories} | **✅ Project Validated:** ${projectValidCategories} | **🔄 Core Framework:** ${generalValidCategories} | **❓ Needs Review:** ${needsReview}`);
+    }
+
+    /**
+     * Helper function to render legend and validation status
+     * @param {Object} dv - Dataview API object
+     * @param {string} fieldName - Field name being analyzed
+     * @param {string} fieldDisplayName - Display name for the field
+     * @param {Object} masterCategoriesFile - Master validation file (or null)
+     * @param {Array} approvedCategories - Array of approved categories
+     * @param {string} currentSubject - Current page subject
+     */
+    _renderLegendAndValidation(dv, fieldName, fieldDisplayName, masterCategoriesFile, approvedCategories, currentSubject, categoryDefinitions = new Map(), generalApprovedCategories = [], generalMasterFile = null) {
+        // Legend
+        dv.header(2, "Legend");
+        dv.paragraph(`**✅** = Validated in this project's Master ${fieldDisplayName} file`);
+        dv.paragraph(`**🔄** = Core Framework category (validated in General subject)`);
+        dv.paragraph("**❓** = Needs review and validation");
+        dv.paragraph("**(number)** = Usage count across the vault");
+
+        // Show validation status at bottom
+        if (masterCategoriesFile) {
+            dv.paragraph(`**Project Validation:** ${approvedCategories.length} approved ${fieldName} categories loaded from [[${masterCategoriesFile.file.name}]]`);
+        } else {
+            dv.paragraph(`**Project Validation:** No master validation file found for subject "${currentSubject}".`);
+        }
+        
+        if (generalMasterFile && generalApprovedCategories.length > 0) {
+            dv.paragraph(`**Core Validation:** ${generalApprovedCategories.length} approved ${fieldName} categories loaded from ${generalMasterFile.file.link}`);
+        }
+    }
+
+    /**
+     * Renders a functional organization hub displaying any frontmatter field organized by namespace
+     * with validation status against the corresponding Master validation file.
+     * 
+     * This method is completely dynamic - you can analyze ANY frontmatter field by passing
+     * different fieldName values. It will automatically look for the appropriate validation
+     * file based on frontmatter criteria (validates-field: fieldName).
+     * 
+     * @param {Object} params - Parameters object
+     * @param {Object} params.dv - Dataview API object
+     * @param {string} [params.fieldName='domain-category'] - DYNAMIC: Any frontmatter field to analyze (e.g., 'domain-category', 'type', 'status', 'tags')
+     * @param {boolean} [params.showOtherCategories=false] - Whether to show "Other Categories" column in tables
+     * @param {boolean} [params.debug=false] - Show detailed debug output
+     * @returns {void} Renders the hub directly to the page
+     * 
+     * @example
+     * // Analyze domain-category field (default)
+     * ConceptManager.renderFunctionalOrganizationHub({ dv });
+     * 
+     * @example
+     * // Analyze document types across the vault
+     * ConceptManager.renderFunctionalOrganizationHub({ 
+     *   dv, 
+     *   fieldName: 'type',
+     *   showOtherCategories: true 
+     * });
+     * 
+     * @example
+     * // Analyze status values with debug info
+     * ConceptManager.renderFunctionalOrganizationHub({ 
+     *   dv, 
+     *   fieldName: 'status',
+     *   debug: true 
+     * });
+     * 
+     * @example
+     * // Analyze custom field like 'priority' or 'project-phase'
+     * ConceptManager.renderFunctionalOrganizationHub({ 
+     *   dv, 
+     *   fieldName: 'priority'
+     * });
+     */
+    async renderFunctionalOrganizationHub({ dv, fieldName = 'domain-category', showOtherCategories = false, debug = false }) {
+    const __wallStartMs = this._getNowMs(); // wall-clock start independent of perf logging
+    const __perfMethod = this._perfStart('renderFunctionalOrganizationHub');
+    this._incrementCallCount('renderFunctionalOrganizationHub');
+
+        // Get current page's subject for filtering
+        const currentSubject = this._getCurrentPageSubject(dv);
+
+        // Check if we successfully retrieved the subject
+        if (!currentSubject) {
+            dv.header(2, "⚠️ Cannot Read Current Page Subject");
+            dv.paragraph("The DataviewJS query cannot access the current page's `subject` frontmatter field. This may be due to:");
+            dv.list([
+                "Obsidian metadata cache not being ready",
+                "The page context not being properly established", 
+                "Missing or malformed frontmatter",
+                "Plugin conflicts or rendering issues"
+            ]);
+            dv.paragraph("**Solution:** Try restarting Obsidian to refresh the metadata cache and plugin state.");
+            dv.paragraph("If the problem persists, check that this file has a valid `subject` field in its frontmatter.");
+            this._perfEnd(__perfMethod, { error: 'no_subject' });
+            return;
+        }
+
+        // Gather category data using helper function
+        const { 
+            categoryMap, 
+            approvedCategories, 
+            generalApprovedCategories = [], 
+            categoryDefinitions, 
+            generalCategoryDefinitions = new Map(),
+            masterCategoriesFile, 
+            generalMasterFile,
+            pages, 
+            repoRoot 
+        } = await this._gatherCategoryData(dv, fieldName, currentSubject);
+
+        const fieldDisplayName = this._getFieldDisplayName(fieldName);
+
+        // Show debug information if requested
+        if (debug) {
+            this._renderDebugInfo(dv, currentSubject, fieldName, masterCategoriesFile, approvedCategories);
+        }
+
+        // Organize categories by namespace
+        const namespaces = this._organizeCategoriesByNamespace(categoryMap, approvedCategories, generalApprovedCategories);
+
+        // Display the tree structure
+        if (namespaces.size === 0) {
+            dv.paragraph(`No ${fieldName} values found in the vault.`);
+        } else {
+            // Summary stats
+            this._renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories);
+            
+            // Sort namespaces alphabetically
+            const sortedNamespaces = Array.from(namespaces.keys()).sort();
+            
+            // Create a single table with all data
+            const tableData = [];
+            sortedNamespaces.forEach(ns => {
+                const categories = namespaces.get(ns);
+                if (categories.length > 0) {
+                    categories.forEach(cat => {
+                        // Use the indicator that was already computed by _organizeCategoriesByNamespace
+                        const indicator = cat.indicator;
+                        
+                        cat.files.forEach((file, index) => {
+                            const path = file.path;
+                            const directory = path.substring(0, path.lastIndexOf('/'));
+                            const trimmedPath = repoRoot && directory.startsWith(repoRoot) 
+                                ? directory.substring(repoRoot.length + 1)
+                                : directory;
+                            
+                            // Find the page to get all its field values
+                            const page = pages.find(p => p.file.path === file.path);
+                            let otherCategories = "";
+                            
+                            if (showOtherCategories) {
+                                const allCategories = page?.[fieldName] || [];
+                                const categoryArray = Array.isArray(allCategories) ? allCategories : [allCategories];
+                                otherCategories = categoryArray
+                                    .filter(c => c !== cat.name)
+                                    .map(c => `\`${c}\``)
+                                    .join(", ");
+                            }
+                            
+                            // Category will now be the last column instead of the first
+                            const row = [
+                                file.link,
+                                trimmedPath,
+                                index === 0 ? `${indicator} \`${cat.name}\` (${cat.files.length})` : ""
+                            ];
+                            
+                            if (showOtherCategories) {
+                                row.push(otherCategories);
+                            }
+                            
+                            tableData.push(row);
+                        });
+                    });
+                }
+            });
+            
+            // Define columns for the single table with updated order
+            const columns = ["File", "Path", "Category"];
+            if (showOtherCategories) {
+                columns.push("Other Categories");
+            }
+            
+            // Render the single table with all data
+            dv.table(columns, tableData);
+        }
+
+        // Render legend and validation information
+        this._renderLegendAndValidation(dv, fieldName, fieldDisplayName, masterCategoriesFile, approvedCategories, currentSubject, categoryDefinitions, generalApprovedCategories, generalMasterFile);
+
+        // Add timestamp and performance info
+    const __duration = this._getNowMs() - __wallStartMs;
+    this._renderTimestamp({ dv, label: 'Hub rendered at', durationMs: __duration });
+
+        this._perfEnd(__perfMethod, { 
+            categories: categoryMap.size, 
+            namespaces: namespaces.size,
+            pages: pages.length,
+            approvedCategories: approvedCategories.length
+        });
+    }
+
+    /**
+     * Renders a simple alphabetical table of domain categories with validation status,
+     * usage count, and description (if validated)
+     * 
+     * @param {Object} params - Parameters object
+     * @param {Object} params.dv - Dataview API object
+     * @param {string} [params.fieldName='domain-category'] - Field name to analyze (e.g., 'domain-category', 'type', 'status')
+     * @param {boolean} [params.showDefinitions=false] - Whether to show category definitions (if available)
+     * @param {boolean} [params.debug=false] - Show detailed debug output
+     * @returns {void} Renders the table directly to the page
+     * 
+     * @example
+     * // Simple table of domain categories
+     * ConceptManager.renderSimpleOrganizationTable({ dv });
+     * 
+     * @example
+     * // Table with definitions
+     * ConceptManager.renderSimpleOrganizationTable({ 
+     *   dv, 
+     *   showDefinitions: true 
+     * });
+     * 
+     * @example
+     * // Analyze document types
+     * ConceptManager.renderSimpleOrganizationTable({ 
+     *   dv, 
+     *   fieldName: 'type' 
+     * });
+     */
+    async renderSimpleOrganizationTable({ dv, fieldName = 'domain-category', showDefinitions = null, debug = false }) {
+    const __wallStartMs = this._getNowMs(); // wall-clock start independent of perf logging
+    const __perfMethod = this._perfStart('renderSimpleOrganizationTable');
+        this._incrementCallCount('renderSimpleOrganizationTable');
+
+        // Get current page's subject for filtering
+        const currentSubject = this._getCurrentPageSubject(dv);
+
+        if (!currentSubject) {
+            dv.header(2, "⚠️ Cannot Read Current Page Subject");
+            dv.paragraph("The DataviewJS query cannot access the current page's `subject` frontmatter field.");
+            this._perfEnd(__perfMethod, { error: 'no_subject' });
+            return;
+        }
+
+        // Gather category data using helper function
+        const { 
+            categoryMap, 
+            approvedCategories, 
+            generalApprovedCategories = [], 
+            categoryDefinitions, 
+            generalCategoryDefinitions = new Map(),
+            masterCategoriesFile, 
+            generalMasterFile,
+            pages, 
+            repoRoot 
+        } = await this._gatherCategoryData(dv, fieldName, currentSubject);
+
+        // Auto-determine showDefinitions if not explicitly set
+        if (showDefinitions === null) {
+            showDefinitions = masterCategoriesFile ? true : false;
+        }
+
+        const fieldDisplayName = this._getFieldDisplayName(fieldName);
+
+        // Show debug information if requested
+        if (debug) {
+            this._renderDebugInfo(dv, currentSubject, fieldName, masterCategoriesFile, approvedCategories);
+        }
+
+        if (categoryMap.size === 0) {
+            dv.paragraph(`No ${fieldName} values found in the vault.`);
+            this._perfEnd(__perfMethod, { categories: 0 });
+            return;
+        }
+
+        // Summary stats
+        this._renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories);
+
+        // Create simple alphabetical table
+        const tableData = [];
+        const categories = Array.from(categoryMap.keys()).sort(); // Alphabetical sort
+
+        categories.forEach(cat => {
+            const files = categoryMap.get(cat);
+            const isValid = approvedCategories.includes(cat);
+            const isGeneralValid = generalApprovedCategories && generalApprovedCategories.includes(cat);
+            let indicator = '❓';
+            
+            if (isValid) {
+                indicator = '✅'; // Validated in this project
+            } else if (isGeneralValid) {
+                indicator = '🔄'; // Core Framework category
+            }
+            
+            const usageCount = files.length;
+            
+            // Get real description from master validation file if available
+            let description = "";
+            if (showDefinitions) {
+                if (isValid && categoryDefinitions.has(cat)) {
+                    // Use project-specific definition
+                    const catInfo = categoryDefinitions.get(cat);
+                    description = catInfo.definition;
+                } else if (isGeneralValid && generalCategoryDefinitions.has(cat)) {
+                    // Use Core Framework definition if no project-specific definition exists
+                    const catInfo = generalCategoryDefinitions.get(cat);
+                    description = catInfo.definition + " _(Core Framework)_";
+                } else {
+                    description = ""; // Empty for unvalidated categories when showing definitions
+                }
+            }
+            
+            if (showDefinitions) {
+                tableData.push([
+                    `${indicator} \`${cat}\``,
+                    usageCount,
+                    description
+                ]);
+            } else {
+                tableData.push([
+                    `${indicator} \`${cat}\``,
+                    usageCount
+                ]);
+            }
+        });
+
+        const columns = showDefinitions 
+            ? ["Category", "Usage", "Description"]
+            : ["Category", "Usage"];
+
+        dv.table(columns, tableData);
+
+        // Render legend and validation information
+        this._renderLegendAndValidation(dv, fieldName, fieldDisplayName, masterCategoriesFile, approvedCategories, 
+            currentSubject, categoryDefinitions, generalApprovedCategories, generalMasterFile);
+
+        // Add timestamp and performance info
+    const __duration = this._getNowMs() - __wallStartMs;
+    this._renderTimestamp({ dv, label: 'Table rendered at', durationMs: __duration });
+
+        this._perfEnd(__perfMethod, { 
+            categories: categoryMap.size,
+            pages: pages.length,
+            approvedCategories: approvedCategories.length
+        });
+    }
+
+    /**
+     * Renders a tree view of domain categories using dashes as folder/subfolder hierarchy
+     * Shows the category organization in namespace structure like a wireframe
+     * 
+     * @param {Object} params - Parameters object
+     * @param {Object} params.dv - Dataview API object
+     * @param {string} [params.fieldName='domain-category'] - Field name to analyze (e.g., 'domain-category', 'type', 'status')
+     * @param {boolean} [params.debug=false] - Show detailed debug output
+     * @returns {void} Renders the tree directly to the page
+     * 
+     * @example
+     * // Tree view of domain categories
+     * ConceptManager.renderOrganizationTree({ dv });
+     * 
+     * @example
+     * // Tree view of document types
+     * ConceptManager.renderOrganizationTree({ 
+     *   dv, 
+     *   fieldName: 'type' 
+     * });
+     */
+    async renderOrganizationTree({ dv, fieldName = 'domain-category', debug = false }) {
+    // Unconditional wall-clock start so duration is meaningful even if perf logging disabled
+    const __wallStartMs = this._getNowMs();
+    const __perfMethod = this._perfStart('renderOrganizationTree');
+        this._incrementCallCount('renderOrganizationTree');
+
+        // Get current page's subject for filtering
+        const currentSubject = this._getCurrentPageSubject(dv);
+
+        if (!currentSubject) {
+            dv.header(2, "⚠️ Cannot Read Current Page Subject");
+            dv.paragraph("The DataviewJS query cannot access the current page's `subject` frontmatter field.");
+            this._perfEnd(__perfMethod, { error: 'no_subject' });
+            return;
+        }
+
+        // Gather category data using helper function
+        const { 
+            categoryMap, 
+            approvedCategories, 
+            generalApprovedCategories = [], 
+            categoryDefinitions, 
+            generalCategoryDefinitions = new Map(),
+            masterCategoriesFile, 
+            generalMasterFile,
+            pages, 
+            repoRoot 
+        } = await this._gatherCategoryData(dv, fieldName, currentSubject);
+
+        const fieldDisplayName = this._getFieldDisplayName(fieldName);
+
+        // Show debug information if requested
+        if (debug) {
+            this._renderDebugInfo(dv, currentSubject, fieldName, masterCategoriesFile, approvedCategories);
+        }
+
+        if (categoryMap.size === 0) {
+            dv.paragraph(`No ${fieldName} values found in the vault.`);
+            this._perfEnd(__perfMethod, { categories: 0 });
+            return;
+        }
+
+        // Summary stats
+        this._renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories);
+
+        // Build tree structure based on dashes
+        const tree = new Map();
+        const categories = Array.from(categoryMap.keys());
+
+        categories.forEach(cat => {
+            const files = categoryMap.get(cat);
+            const isProjectValid = approvedCategories.includes(cat);
+            const isGeneralValid = generalApprovedCategories.includes(cat);
+            
+            // Set indicator based on validation: project-specific, Core Framework, or needs validation
+            let indicator;
+            if (isProjectValid) {
+                indicator = '✅'; // Validated in this project
+            } else if (isGeneralValid) {
+                indicator = '🔄'; // Core Framework category
+            } else {
+                indicator = '❓'; // Needs validation
+            }
+            const usageCount = files.length;
+            
+            // Split by dashes to create hierarchy
+            const parts = cat.split('-');
+            let currentLevel = tree;
+            
+            // Build the tree path
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                const isLastPart = i === parts.length - 1;
+                
+                if (!currentLevel.has(part)) {
+                    currentLevel.set(part, {
+                        children: new Map(),
+                        isCategory: false,
+                        fullName: '',
+                        indicator: '',
+                        usageCount: 0
+                    });
+                }
+                
+                const node = currentLevel.get(part);
+                
+                if (isLastPart) {
+                    // This is the final category
+                    node.isCategory = true;
+                    node.fullName = cat;
+                    node.indicator = indicator;
+                    node.usageCount = usageCount;
+                }
+                
+                currentLevel = node.children;
+            }
+        });
+
+        // Render the tree
+        const renderTreeLevel = (level, indent = '') => {
+            const entries = Array.from(level.entries()).sort(([a], [b]) => a.localeCompare(b));
+            const lines = [];
+            
+            entries.forEach(([key, node], index) => {
+                const isLast = index === entries.length - 1;
+                const connector = isLast ? '└── ' : '├── ';
+                const nextIndent = indent + (isLast ? '    ' : '│   ');
+                
+                if (node.isCategory) {
+                    // This is a full category - show with validation status
+                    lines.push(`${indent}${connector}${node.indicator} \`${node.fullName}\` (${node.usageCount})`);
+                } else {
+                    // This is just a namespace folder
+                    lines.push(`${indent}${connector}**${key}-**`);
+                }
+                
+                // Render children
+                if (node.children.size > 0) {
+                    lines.push(...renderTreeLevel(node.children, nextIndent));
+                }
+            });
+            
+            return lines;
+        };
+
+        dv.header(2, "Category Tree Structure");
+        const treeLines = renderTreeLevel(tree);
+        dv.paragraph("```text\n" + treeLines.join('\n') + "\n```");
+
+        // Render legend and validation information
+        this._renderLegendAndValidation(dv, fieldName, fieldDisplayName, masterCategoriesFile, approvedCategories, currentSubject, categoryDefinitions, generalApprovedCategories, generalMasterFile);
+
+        // Add timestamp and performance info
+    // Use wall start (independent of perf logging) for accurate duration
+    const __duration = this._getNowMs() - __wallStartMs;
+        this._renderTimestamp({ dv, label: 'Tree rendered at', durationMs: __duration });
+
+        this._perfEnd(__perfMethod, { 
+            categories: categoryMap.size,
+            pages: pages.length,
+            approvedCategories: approvedCategories.length
+        });
+    }
+
+    /**
      * Utility method to normalize values to arrays (used by legacy/non-cached methods)
      * Handles both string and array formats, including nested arrays
      * Note: For cached flows, use SubjectIndexCache.normalizeValues instead to avoid drift
