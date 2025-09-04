@@ -24,6 +24,23 @@
  *   KnowledgeOrganizationManager.renderOrganizationTree({ dv });
  *   ```
  */
+                    ${showDefinitions ? `<td>${description}</td>` : ''}
+                </tr>
+                <tr id="${detailsId}" class="file-details-row" style="display: none;" onclick="${toggleFunction}">
+                    <td colspan="${showDefinitions ? '3' : '2'}" class="file-details-cell">
+                        <div class="metadata-files">
+                            ${fileLinks}
+                        </div>
+                    </td>
+                </tr>`nizationTable(dv, 'field-name', dv.current().subject);
+ *   ```
+ * 
+ *   - Organization Tree View
+ *   ```dataviewjs
+ *   const { KnowledgeOrganizationManager } = customJS;
+ *   KnowledgeOrganizationManager.renderOrganizationTree({ dv });
+ *   ```
+ */
 
 class KnowledgeOrganizationManager {
     constructor() {
@@ -85,7 +102,7 @@ class KnowledgeOrganizationManager {
         const hasBuild = (typeof durationMs === 'number' && isFinite(durationMs));
         const buildMs = hasBuild ? Math.round(durationMs) : null;
         const buildAttr = hasBuild ? ` data-kom-build-ms="${buildMs}"` : '';
-        const extraText = hasBuild ? ` (build: ${buildMs}ms)` : '';
+        const extraText = hasBuild ? `(build: ${buildMs}ms)` : '';
         
         // Use el.innerHTML for proper HTML rendering
         const tsDiv = dv.el("div", "");
@@ -336,13 +353,13 @@ class KnowledgeOrganizationManager {
     }
 
     _renderLegendAndValidation(dv, fieldName, fieldDisplayName, masterCategoriesFile, approvedCategories, currentSubject, categoryDefinitions = new Map(), generalApprovedCategories = [], generalMasterFile = null) {
-        // // Legend
-        // dv.header(2, "Legend");
-        // dv.paragraph(`**✅** = Validated in this project's Master ${fieldDisplayName} file`);
-        // if (currentSubject !== "General") {
-        //     dv.paragraph(`**🔄** = Core Framework category (validated in General subject)`);
-        // }
-        // dv.paragraph("**❓** = Needs review and validation");
+        // Legend
+        dv.header(2, "Legend");
+        dv.paragraph(`**✅** = Validated in this project's Master ${fieldDisplayName} file`);
+        if (currentSubject !== "General") {
+            dv.paragraph(`**🔄** = Core Framework category (validated in General subject)`);
+        }
+        dv.paragraph("**❓** = Needs review and validation");
 
         // Show validation status at bottom
         if (masterCategoriesFile) {
