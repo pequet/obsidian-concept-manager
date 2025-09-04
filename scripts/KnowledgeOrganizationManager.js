@@ -27,7 +27,7 @@
 
 class KnowledgeOrganizationManager {
     constructor() {
-        console.log("KnowledgeOrganizationManager class loaded and ready 👾");
+        console.log("KnowledgeOrganizationManager class loaded and ready 👹");
 
         // Initialize performance tracking
         this.perf = {
@@ -209,8 +209,10 @@ class KnowledgeOrganizationManager {
                             approvedCategories.push(category);
                             // Add a placeholder definition if not found above
                             if (!categoryDefinitions.has(category)) {
+                                // Don't set a default "Validated category" message
+                                // Use the actual definition from the master file
                                 categoryDefinitions.set(category, {
-                                    definition: "Validated category",
+                                    definition: "",
                                     usageContext: "Various"
                                 });
                             }
@@ -319,21 +321,27 @@ class KnowledgeOrganizationManager {
         dv.paragraph(`**Approved Categories:** ${approvedCategories.length} loaded`);
     }
 
-    _renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories = []) {
+    _renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories = [], currentSubject) {
         const totalCategories = Array.from(categoryMap.keys()).length;
         const projectValidCategories = Array.from(categoryMap.keys()).filter(cat => approvedCategories.includes(cat)).length;
         const generalValidCategories = Array.from(categoryMap.keys()).filter(cat => !approvedCategories.includes(cat) && generalApprovedCategories.includes(cat)).length;
         const validCategories = projectValidCategories + generalValidCategories;
         const needsReview = totalCategories - validCategories;
         
-        dv.paragraph(`**Total Categories:** ${totalCategories} | **✅ Project Validated:** ${projectValidCategories} | **🔄 Core Framework:** ${generalValidCategories} | **❓ Needs Review:** ${needsReview}`);
+        if (currentSubject === "General") {
+            dv.paragraph(`**Total Categories:** ${totalCategories} | **✅ Project Validated:** ${projectValidCategories} | **❓ Needs Review:** ${needsReview}`);
+        } else {
+            dv.paragraph(`**Total Categories:** ${totalCategories} | **✅ Project Validated:** ${projectValidCategories} | **🔄 Core Framework:** ${generalValidCategories} | **❓ Needs Review:** ${needsReview}`);
+        }
     }
 
     _renderLegendAndValidation(dv, fieldName, fieldDisplayName, masterCategoriesFile, approvedCategories, currentSubject, categoryDefinitions = new Map(), generalApprovedCategories = [], generalMasterFile = null) {
         // Legend
         dv.header(2, "Legend");
         dv.paragraph(`**✅** = Validated in this project's Master ${fieldDisplayName} file`);
-        dv.paragraph(`**🔄** = Core Framework category (validated in General subject)`);
+        if (currentSubject !== "General") {
+            dv.paragraph(`**🔄** = Core Framework category (validated in General subject)`);
+        }
         dv.paragraph("**❓** = Needs review and validation");
         dv.paragraph("**(number)** = Usage count across the vault");
 
@@ -344,7 +352,7 @@ class KnowledgeOrganizationManager {
             dv.paragraph(`**Project Validation:** No master validation file found for subject "${currentSubject}".`);
         }
         
-        if (generalMasterFile && generalApprovedCategories.length > 0) {
+        if (currentSubject !== "General" && generalMasterFile && generalApprovedCategories.length > 0) {
             dv.paragraph(`**Core Validation:** ${generalApprovedCategories.length} approved ${fieldName} categories loaded from ${generalMasterFile.file.link}`);
         }
     }
@@ -403,7 +411,7 @@ class KnowledgeOrganizationManager {
         }
 
         // Summary stats
-        this._renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories);
+        this._renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories, currentSubject);
 
         // Create accordion table - single HTML table with collapsible rows
         const categories = Array.from(categoryMap.keys()).sort(); // Alphabetical sort
@@ -454,31 +462,36 @@ class KnowledgeOrganizationManager {
                 }
             }
 
-            // Create file links list with simple file names - properly formatted for Obsidian internal links
+            // Create file links list with one file per line and trimmed paths
             const fileLinks = files.map(f => {
                 const fileName = f.page.file.name;
                 const filePath = f.page.file.path;
-                // Format that works in HTML rendering for Obsidian internal links
-                return `<a class="internal-link" data-href="${filePath}" data-file="${fileName}">${fileName}</a>`;
-            }).join(', ');
+                
+                // Get the path without the filename
+                const directory = filePath.substring(0, filePath.lastIndexOf('/'));
+                
+                // Trim the path from repository root (if we have a config file to determine it)
+                let trimmedPath = directory;
+                if (repoRoot && directory.startsWith(repoRoot)) {
+                    trimmedPath = directory.substring(repoRoot.length + 1);
+                }
+                
+                // Format that works in HTML rendering for Obsidian internal links - one per line
+                return `<div><a class="internal-link" data-href="${filePath}" data-file="${fileName}">${fileName}</a> (${trimmedPath})</div>`;
+            }).join('');
             
-            // Add row with accordion WITH indicators and correct columns
+            // Add row with accordion WHERE THE ENTIRE ROW IS CLICKABLE
             htmlContent += `
-                <tr>
+                <tr class="metadata-row" data-category="${cat}" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'table-row' : 'none';">
                     <td><span class="metadata-indicator">${indicator}</span> <code class="metadata-category">${cat}</code></td>
                     <td><span class="metadata-count">${usageCount} ${fileText}</span></td>
                     ${showDefinitions ? `<td>${description}</td>` : ''}
                 </tr>
-                <tr class="file-details-row">
+                <tr class="file-details-row" style="display: none;">
                     <td colspan="${showDefinitions ? '3' : '2'}" class="file-details-cell">
-                        <details class="metadata-accordion">
-                            <summary class="metadata-summary">
-                                Files (click to view)
-                            </summary>
-                            <div class="metadata-files">
-                                ${fileLinks}
-                            </div>
-                        </details>
+                        <div class="metadata-files">
+                            ${fileLinks}
+                        </div>
                     </td>
                 </tr>
             `;
@@ -497,11 +510,16 @@ class KnowledgeOrganizationManager {
             .metadata-validation-table th,
             .metadata-validation-table td {
                 text-align: left;
-
                 vertical-align: top;
             }
             .metadata-validation-table th {
                 font-weight: bold;
+            }
+            .metadata-row {
+                cursor: pointer;
+            }
+            .metadata-row:hover {
+                background-color: rgba(0,0,0,0.02);
             }
             .file-details-row td {
                 padding: 0;
@@ -521,25 +539,17 @@ class KnowledgeOrganizationManager {
                 font-size: 0.9em;
             }
             .metadata-files {
-                padding: 6px 12px;
+                padding: 12px;
                 background-color: rgba(0,0,0,0.02);
-                margin-bottom: 8px;
                 font-size: 0.95em;
             }
             .metadata-description {
-                margin-top: 4px;
+                margin-top: 12px;
             }
-            /* Hide default triangles */
             .metadata-accordion summary::-webkit-details-marker,
             .metadata-accordion summary::marker {
                 display: none;
                 content: '';
-            }
-            .metadata-summary {
-                cursor: pointer;
-                padding: 4px 8px;
-                background: rgba(0,0,0,0.03);
-                display: inline-block;
             }
         </style>
         `;
@@ -616,7 +626,7 @@ class KnowledgeOrganizationManager {
         }
 
         // Summary stats
-        this._renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories);
+        this._renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories, currentSubject);
 
         // Build tree structure based on dashes
         const tree = new Map();
