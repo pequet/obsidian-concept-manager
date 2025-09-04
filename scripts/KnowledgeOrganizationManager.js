@@ -497,12 +497,10 @@ class KnowledgeOrganizationManager {
             .metadata-validation-table th,
             .metadata-validation-table td {
                 text-align: left;
-                padding: 6px;
-                border-bottom: 1px solid #eee;
+
                 vertical-align: top;
             }
             .metadata-validation-table th {
-                border-bottom: 2px solid #ddd;
                 font-weight: bold;
             }
             .file-details-row td {
@@ -527,7 +525,6 @@ class KnowledgeOrganizationManager {
                 background-color: rgba(0,0,0,0.02);
                 margin-bottom: 8px;
                 font-size: 0.95em;
-                border-bottom: 1px solid #eee;
             }
             .metadata-description {
                 margin-top: 4px;
