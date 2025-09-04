@@ -421,9 +421,13 @@ class KnowledgeOrganizationManager {
             <tbody>
         `;
 
-        // Build table rows with accordion details
+        // Build table rows with accordion WITH validation indicators and proper columns
         categories.forEach(cat => {
             const files = categoryMap.get(cat);
+            const usageCount = files.length;
+            const fileText = usageCount === 1 ? "file" : "files";
+            
+            // Determine indicator based on whether the category is in the master list
             const isValid = approvedCategories.includes(cat);
             const isGeneralValid = generalApprovedCategories && generalApprovedCategories.includes(cat);
             let indicator = '❓';
@@ -433,9 +437,6 @@ class KnowledgeOrganizationManager {
             } else if (isGeneralValid) {
                 indicator = '🔄'; // Core Framework category
             }
-            
-            const usageCount = files.length;
-            const fileText = usageCount === 1 ? "file" : "files";
             
             // Get description from master validation file if available
             let description = "";
@@ -453,25 +454,29 @@ class KnowledgeOrganizationManager {
                 }
             }
 
-            // Create file links list with simple file names
+            // Create file links list with simple file names - properly formatted for Obsidian internal links
             const fileLinks = files.map(f => {
                 const fileName = f.page.file.name;
-                return `<a href="#" class="internal-link" data-href="${f.page.file.path}">${fileName}</a>`;
+                const filePath = f.page.file.path;
+                // Format that works in HTML rendering for Obsidian internal links
+                return `<a class="internal-link" data-href="${filePath}" data-file="${fileName}">${fileName}</a>`;
             }).join(', ');
             
-            // Add row with accordion
+            // Add row with accordion WITH indicators and correct columns
             htmlContent += `
                 <tr>
-                    <td colspan="${showDefinitions ? '3' : '2'}">
+                    <td><span class="metadata-indicator">${indicator}</span> <code class="metadata-category">${cat}</code></td>
+                    <td><span class="metadata-count">${usageCount} ${fileText}</span></td>
+                    ${showDefinitions ? `<td>${description}</td>` : ''}
+                </tr>
+                <tr class="file-details-row">
+                    <td colspan="${showDefinitions ? '3' : '2'}" class="file-details-cell">
                         <details class="metadata-accordion">
                             <summary class="metadata-summary">
-                                <span class="metadata-indicator">${indicator}</span> 
-                                <code class="metadata-category">${cat}</code>
-                                <span class="metadata-count">(${usageCount} ${fileText})</span>
+                                Files (click to view)
                             </summary>
                             <div class="metadata-files">
-                                <strong>Files:</strong> ${fileLinks}
-                                ${showDefinitions && description ? `<div class="metadata-description"><strong>Description:</strong> ${description}</div>` : ''}
+                                ${fileLinks}
                             </div>
                         </details>
                     </td>
@@ -487,41 +492,57 @@ class KnowledgeOrganizationManager {
             .metadata-validation-table {
                 width: 100%;
                 border-collapse: collapse;
+                margin-bottom: 20px;
+            }
+            .metadata-validation-table th,
+            .metadata-validation-table td {
+                text-align: left;
+                padding: 6px;
+                border-bottom: 1px solid #eee;
+                vertical-align: top;
             }
             .metadata-validation-table th {
-                text-align: left;
-                padding: 8px;
-                border-bottom: 1px solid #ddd;
+                border-bottom: 2px solid #ddd;
+                font-weight: bold;
             }
-            .metadata-accordion {
-                width: 100%;
+            .file-details-row td {
+                padding: 0;
             }
-            .metadata-summary {
-                cursor: pointer;
-                padding: 8px 0;
-                display: flex;
-                align-items: center;
+            .file-details-cell {
+                padding: 0 !important;
             }
             .metadata-indicator {
-                margin-right: 8px;
+                margin-right: 6px;
             }
             .metadata-category {
-                margin-right: 8px;
+                margin-right: 6px;
+                font-weight: bold;
             }
             .metadata-count {
                 color: #666;
                 font-size: 0.9em;
             }
             .metadata-files {
-                padding: 8px 16px;
-                background-color: rgba(0,0,0,0.03);
-                border-radius: 4px;
-                margin-top: 4px;
+                padding: 6px 12px;
+                background-color: rgba(0,0,0,0.02);
+                margin-bottom: 8px;
+                font-size: 0.95em;
+                border-bottom: 1px solid #eee;
             }
             .metadata-description {
-                margin-top: 8px;
-                padding-top: 8px;
-                border-top: 1px dotted #ddd;
+                margin-top: 4px;
+            }
+            /* Hide default triangles */
+            .metadata-accordion summary::-webkit-details-marker,
+            .metadata-accordion summary::marker {
+                display: none;
+                content: '';
+            }
+            .metadata-summary {
+                cursor: pointer;
+                padding: 4px 8px;
+                background: rgba(0,0,0,0.03);
+                display: inline-block;
             }
         </style>
         `;
