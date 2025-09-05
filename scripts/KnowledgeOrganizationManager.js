@@ -10,10 +10,26 @@
  *
  * Prerequisites:
  *   - DataView plugin
- *   - CustomJS plugin
+ *      _renderSummaryStats(dv, categoryMap, approvedCategories, fieldName, generalApprovedCategories = [], currentSubject) {
+        const totalCategories = Array.from(categoryMap.keys()).length;
+        const projectValidCategories = Array.from(categoryMap.keys()).filter(cat => approvedCategories.includes(cat)).length;
+        const generalValidCategories = Array.from(categoryMap.keys()).filter(cat => !approvedCategories.includes(cat) && generalApprovedCategories.includes(cat)).length;
+        const validCategories = projectValidCategories + generalValidCategories;
+        const needsReview = totalCategories - validCategories;
+        
+        if (!currentSubject) {
+            // If no subject filter was applied, display an all-subjects summary
+            dv.header(2, `All ${this._getFieldDisplayName(fieldName)} Values (All Subjects)`);
+            dv.paragraph(`Found **${totalCategories}** unique ${fieldName} values across all subjects.`);
+        } else if (currentSubject === "General") {…} else {…}mJS plugin
  *
  * Usage:
- *   - Simple Organization Table (accordion view)
+    async renderSimpleOrganizationTable(dv, fieldName = 'domain-category', currentSubject, showDefinitions = null, debug = false) {
+        const __wallStartMs = this._getNowMs(); // wall-clock start independent of perf logging
+        const __perfMethod = this._perfStart('renderSimpleOrganizationTable');
+        this._incrementCallCount('renderSimpleOrganizationTable');
+
+        // If no subject is provided, we'll get all entries regardless of subject Simple Organization Table (accordion view)
  *   ```dataviewjs
  *   customJS.KnowledgeOrganizationManager.renderSimpleOrganizationTable(dv, 'field-name', dv.current().subject);
  *   ```
@@ -131,6 +147,11 @@ class KnowledgeOrganizationManager {
     }
 
     _findMasterValidationFile(dv, currentSubject, fieldName) {
+        // If no subject is provided, we cannot find a validation file
+        if (!currentSubject) {
+            return null;
+        }
+        
         return dv.pages()
             .where(p => 
                 p.subject === currentSubject &&
@@ -187,13 +208,24 @@ class KnowledgeOrganizationManager {
             lines.forEach(line => {
                 // Match lines that contain category definitions with backticks
                 // Format: | `category-name` | Definition text | Usage context |
-                const fullMatch = line.match(/^\|\s*`([^`]+)`\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/);
-                if (fullMatch) {
-                    const category = fullMatch[1].trim();
-                    const definition = fullMatch[2].trim();
-                    const usageContext = fullMatch[3].trim();
+                const fullMatchWithBackticks = line.match(/^\|\s*`([^`]+)`\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/);
+                // Also match categories without backticks
+                // Format: | category-name | Definition text | Usage context |
+                const fullMatchWithoutBackticks = !fullMatchWithBackticks && line.match(/^\|\s*([^|]+?)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/);
+                
+                if (fullMatchWithBackticks || fullMatchWithoutBackticks) {
+                    const match = fullMatchWithBackticks || fullMatchWithoutBackticks;
+                    const category = match[1].trim();
+                    const definition = match[2].trim();
+                    const usageContext = match[3].trim();
                     
-                    if (category && category !== 'Category') {
+                    if (category && 
+                        category !== 'Category' && 
+                        category !== 'Subject' && 
+                        category !== '---' &&
+                        category !== '---------' &&
+                        !category.includes('--') // Skip separator rows
+                    ) {
                         approvedCategories.push(category);
                         categoryDefinitions.set(category, {
                             definition: definition,
@@ -202,10 +234,20 @@ class KnowledgeOrganizationManager {
                     }
                 } else {
                     // Fallback to simple category match for backwards compatibility
-                    const categoryMatch = line.match(/^\|\s*`([^`]+)`\s*\|/);
-                    if (categoryMatch) {
-                        const category = categoryMatch[1].trim();
-                        if (category && category !== 'Category') {
+                    const categoryMatchWithBackticks = line.match(/^\|\s*`([^`]+)`\s*\|/);
+                    const categoryMatchWithoutBackticks = !categoryMatchWithBackticks && line.match(/^\|\s*([^|]+?)\s*\|/);
+                    
+                    if (categoryMatchWithBackticks || categoryMatchWithoutBackticks) {
+                        const match = categoryMatchWithBackticks || categoryMatchWithoutBackticks;
+                        const category = match[1].trim();
+                        
+                        if (category && 
+                            category !== 'Category' && 
+                            category !== 'Subject' && 
+                            category !== '---' &&
+                            category !== '---------' &&
+                            !category.includes('--') // Skip separator rows
+                        ) {
                             approvedCategories.push(category);
                             // Add a placeholder definition if not found above
                             if (!categoryDefinitions.has(category)) {
@@ -235,9 +277,17 @@ class KnowledgeOrganizationManager {
         const { approvedCategories: generalApprovedCategories = [], categoryDefinitions: generalCategoryDefinitions = new Map() } = 
             await this._parseApprovedCategories(generalMasterFile, dv);
             
-        // Get all pages with matching subject, excluding archives
-        const pages = dv.pages()
-            .where(p => !this._isArchivedPath(p) && p.subject === currentSubject);
+        // Get pages based on subject (or all pages if currentSubject is null)
+        let pages;
+        if (currentSubject) {
+            // Filter by subject if provided
+            pages = dv.pages()
+                .where(p => !this._isArchivedPath(p) && p.subject === currentSubject);
+        } else {
+            // Get all non-archived pages if no subject is provided
+            pages = dv.pages()
+                .where(p => !this._isArchivedPath(p));
+        }
 
         // Get config file to determine root path for trimming
         const configFile = dv.pages()
@@ -328,7 +378,11 @@ class KnowledgeOrganizationManager {
         const validCategories = projectValidCategories + generalValidCategories;
         const needsReview = totalCategories - validCategories;
         
-        if (currentSubject === "General") {
+        if (!currentSubject) {
+            // If no subject filter was applied, display an all-subjects summary
+            dv.header(2, `All ${this._getFieldDisplayName(fieldName)} Values (All Subjects)`);
+            dv.paragraph(`Found **${totalCategories}** unique ${fieldName} values across all subjects.`);
+        } else if (currentSubject === "General") {
             dv.paragraph(`**Total Categories:** ${totalCategories} | **✅ Project Validated:** ${projectValidCategories} | **❓ Needs Review:** ${needsReview}`);
         } else {
             dv.paragraph(`**Total Categories:** ${totalCategories} | **✅ Project Validated:** ${projectValidCategories} | **🔄 Core Framework:** ${generalValidCategories} | **❓ Needs Review:** ${needsReview}`);
@@ -344,15 +398,17 @@ class KnowledgeOrganizationManager {
         // }
         // dv.paragraph("**❓** = Needs review and validation");
 
-        // Show validation status at bottom
+        // Show validation status at bottom - always try to find validation files
         if (masterCategoriesFile) {
             dv.paragraph(`**Project Validation:** ${approvedCategories.length} approved ${fieldName} categories loaded from [[${masterCategoriesFile.file.name}]]`);
-        } else {
+        } else if (currentSubject) {
             dv.paragraph(`**Project Validation:** No master validation file found for subject "${currentSubject}".`);
         }
         
-        if (currentSubject !== "General" && generalMasterFile && generalApprovedCategories.length > 0) {
-            dv.paragraph(`**Core Validation:** ${generalApprovedCategories.length} approved ${fieldName} categories loaded from ${generalMasterFile.file.link}`);
+        if (generalMasterFile && generalApprovedCategories.length > 0) {
+            dv.paragraph(`**Core Validation:** ${generalApprovedCategories.length} approved ${fieldName} categories loaded from [[${generalMasterFile.file.name}]]`);
+        } else if (!generalMasterFile) {
+            dv.paragraph(`**Core Validation:** No General subject validation file found for ${fieldName}.`);
         }
     }
 
@@ -361,7 +417,8 @@ class KnowledgeOrganizationManager {
      * 
      * @param {Object} dv - Dataview API object
      * @param {string} fieldName - Field name to analyze (e.g., 'domain-category', 'type', 'status')
-     * @param {string} currentSubject - Current page subject for filtering
+     * @param {string|null} [currentSubject] - Current page subject for filtering. If null or undefined, 
+     *                                         returns all values across all subjects without filtering
      * @param {boolean} [showDefinitions=null] - Show definitions column (auto-detected if null)
      * @param {boolean} [debug=false] - Show detailed debug output
      * @returns {void} Renders directly to the page
@@ -371,12 +428,7 @@ class KnowledgeOrganizationManager {
         const __perfMethod = this._perfStart('renderSimpleOrganizationTable');
         this._incrementCallCount('renderSimpleOrganizationTable');
 
-        if (!currentSubject) {
-            dv.header(2, "⚠️ Cannot Read Current Page Subject");
-            dv.paragraph("The DataviewJS query cannot access the current page's `subject` frontmatter field.");
-            this._perfEnd(__perfMethod, { error: 'no_subject' });
-            return;
-        }
+        // If no subject is provided, we'll get all entries regardless of subject
 
         // Gather category data using helper function
         const { 
@@ -736,5 +788,3 @@ class KnowledgeOrganizationManager {
     }
 }
 
-// Register the class instance in customJS
-customJS.KnowledgeOrganizationManager = new KnowledgeOrganizationManager();
