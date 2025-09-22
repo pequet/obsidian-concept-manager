@@ -3363,7 +3363,7 @@ class ConceptManager {
 
             // Render section header
             if (headerLevel > 0) {
-                dv.header(headerLevel, `Dynamic Groupings`);
+                dv.header(headerLevel, `Groupings`);
             }
 
             contentRendered = true;
@@ -6213,6 +6213,27 @@ class ConceptManager {
                 dv.paragraph("---");
             }
 
+            // Section: dynamicGroupings 
+            const dynamicGroupingsEnabled = enabledSteps.includes('dynamicGroupings');
+            if (debug) {
+                dv.paragraph(`**Dynamic Groupings Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('dynamicGroupings') ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Dynamic Groupings: ${dynamicGroupingsEnabled ? "Yes" : "No"}`);
+            }
+            if (dynamicGroupingsEnabled) {
+                this._renderDynamicGroupings({ 
+                    dv,
+                    headerLevel,
+                    debug,
+                    showTimestamp,
+                    showTimeBuild
+                });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Dynamic Groupings`);
+                dv.paragraph("---");
+            }
+
             // Section: keyConnections_legacy (original version)
             const keyConnectionsLegacyEnabled = enabledSteps.includes('keyConnections_legacy') && domainIsConceptual;
             if (debug) {
@@ -6331,27 +6352,6 @@ class ConceptManager {
             } else if (debug) {
                 dv.paragraph(`❌ Skipping Related Hubs Cached`);
                     dv.paragraph("---");
-            }
-
-            // Section: dynamicGroupings 
-            const dynamicGroupingsEnabled = enabledSteps.includes('dynamicGroupings');
-            if (debug) {
-                dv.paragraph(`**Dynamic Groupings Check**`);
-                dv.paragraph(`Step enabled: ${enabledSteps.includes('dynamicGroupings') ? "Yes" : "No"}`);
-                dv.paragraph(`Should run Dynamic Groupings: ${dynamicGroupingsEnabled ? "Yes" : "No"}`);
-            }
-            if (dynamicGroupingsEnabled) {
-                this._renderDynamicGroupings({ 
-                    dv,
-                    headerLevel,
-                    debug,
-                    showTimestamp,
-                    showTimeBuild
-                });
-                viewsGenerated++;
-            } else if (debug) {
-                dv.paragraph(`❌ Skipping Dynamic Groupings`);
-                dv.paragraph("---");
             }
 
             // Final summary
