@@ -245,7 +245,8 @@ class ConceptWrappers {
             'contentClassifications', 
             'keyConnections', 
             'relatedContent', 
-            'relatedHubs'
+            'relatedHubs',
+            'dynamicGroupings'
         ], 
         headerLevel = 2, 
         concurrency = 1, 
@@ -268,7 +269,8 @@ class ConceptWrappers {
             contentClassifications: 'Classifications',
             keyConnections: 'Key Connections',
             relatedContent: 'Related Content',
-            relatedHubs: 'Related Hubs'
+            relatedHubs: 'Related Hubs',
+            dynamicGroupings: 'Dynamic Groupings'
         };
         if (debug && console && console.log) {
             console.log('[SmarterView] init', {

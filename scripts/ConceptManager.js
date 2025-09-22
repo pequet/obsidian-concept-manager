@@ -123,13 +123,15 @@ class ConceptManager {
      * - 'relatedContent': Cached related content discovery
      * - 'relatedHubs_legacy': Legacy related hubs analysis
      * - 'relatedHubs': Cached related hubs analysis
+     * - 'dynamicGroupings': Virtual groupings based on group-* fields
      */
     static SECTION_IDENTIFIERS = [
         'cachePrep',
         'contentClassifications_legacy', 'contentClassifications',
         'keyConnections_legacy', 'keyConnections', 
         'relatedContent_legacy', 'relatedContent',
-        'relatedHubs_legacy', 'relatedHubs'
+        'relatedHubs_legacy', 'relatedHubs',
+        'dynamicGroupings'
     ];
 
     constructor() {
@@ -3186,6 +3188,212 @@ class ConceptManager {
     }
 
     /**
+     * Dynamic Groupings - Renders virtual groupings based on group-* fields without requiring physical pages
+     * 
+     * This method analyzes the current page's group-* fields (e.g., group-release-year: 1972) and 
+     * finds other pages with the same values, creating virtual browsable groupings. This allows 
+     * browsing by release year, genre, etc., without requiring hundreds of physical year/genre pages.
+     * 
+     * Filtering strategies:
+     * - Minimum count threshold (only show groupings with ≥ minItemsThreshold items)
+     * - Exclude self from groupings
+     * - No hardcoded assumptions about which groupings are "important"
+     * 
+     * @param {Object} params - Parameters object
+     * @param {Object} params.dv - Dataview API object
+     * @param {number} [params.headerLevel=2] - Header level for the section
+     * @param {boolean} [params.debug=false] - Enable debug logging
+     * @param {boolean} [params.showTimestamp=true] - Show render timestamp
+     * @param {boolean} [params.showTimeBuild=true] - Show build time in timestamp
+     * @param {number} [params.minItemsThreshold=2] - Minimum items required to show a grouping
+     */
+    async _renderDynamicGroupings({ 
+        dv, 
+        headerLevel = 2, 
+        debug = false, 
+        showTimestamp = true, 
+        showTimeBuild = true,
+        minItemsThreshold = 1
+    } = {}) {
+        const __perfMethod = this._perfStart('_renderDynamicGroupings');
+        this._incrementCallCount('_renderDynamicGroupings');
+
+        try {
+            const __buildStart = this._getNowMs();
+            const currentPage = dv.current();
+            let contentRendered = false;
+
+            if (this.debug) console.log(`🔗 Starting Dynamic Groupings for: ${currentPage?.file?.name}`);
+            if (this.debug) console.log(`⏱️ METHOD START TIME: ${__buildStart}ms`);
+
+            // Check if currentPage exists
+            if (!currentPage) {
+                if (debug) dv.paragraph("❌ No current page available for dynamic groupings");
+                return;
+            }
+
+            // Get all group-* fields from current page
+            const groupFields = Object.keys(currentPage).filter(key => key.startsWith('group-') && currentPage[key]);
+            
+            if (debug) {
+                dv.paragraph(`**🔧 Dynamic Groupings Debug Info**`);
+                dv.paragraph(`Current page: ${currentPage.file.name}`);
+                dv.paragraph(`Found group fields: [${groupFields.join(', ')}]`);
+            }
+
+            if (groupFields.length === 0) {
+                if (debug) dv.paragraph("❌ No group-* fields found on current page");
+                return;
+            }
+
+            // Get config validation for the current page's subject
+            const config = this.getConfigForSubject({ 
+                dv, 
+                subject: currentPage.subject, 
+                debug: debug 
+            });
+
+            const validSubjectsSet = new Set(config.validSubjects || []);
+            const validDomainsSet = new Set(config.validDomains || []);
+
+            // Collect dynamic groupings
+            const dynamicGroupings = new Map(); // groupType -> { values: Map(value -> pages[]), label: string }
+
+            for (const groupField of groupFields) {
+                const groupType = groupField.replace('group-', ''); // e.g., 'release-year'
+                const values = this.normalizeValues_LEGACY(currentPage[groupField]);
+
+                if (debug) {
+                    dv.paragraph(`Processing ${groupField}: [${values.join(', ')}]`);
+                }
+
+                for (const value of values) {
+                    // Find all pages with this group field and value
+                    const matchingPages = dv.pages()
+                        .where(p => {
+                            // Skip self
+                            if (p.file.path === currentPage.file.path) return false;
+                            
+                            // Subject validation
+                            if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+                            
+                            // Domain validation
+                            if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
+                            
+                            // Archive exclusion
+                            const pathLower = String(p.file?.path || '').toLowerCase();
+                            if (pathLower.includes('/archives/') || pathLower.includes('/models/4. archives/')) return false;
+                            
+                            // Must have the same group field with matching value
+                            if (!p[groupField]) return false;
+                            const pageValues = this.normalizeValues_LEGACY(p[groupField]);
+                            return pageValues.includes(value);
+                        })
+                        .array();
+
+                    // Only include if meets minimum threshold
+                    if (matchingPages.length >= minItemsThreshold) {
+                        if (!dynamicGroupings.has(groupType)) {
+                            // Use canonical name from hub (like classifications do)
+                            const canonicalName = this.getCanonicalNameForCategory({ 
+                                dv, 
+                                domainCategory: groupType, 
+                                subject: currentPage.subject, 
+                                debug: false 
+                            });
+                            const displayLabel = canonicalName || groupType; // Fallback to raw groupType
+                            
+                            dynamicGroupings.set(groupType, {
+                                values: new Map(),
+                                label: displayLabel
+                            });
+                        }
+                        
+                        dynamicGroupings.get(groupType).values.set(value, matchingPages);
+                    }
+                }
+            }
+
+            if (debug) {
+                dv.paragraph(`Found ${dynamicGroupings.size} grouping types with sufficient items`);
+                for (const [groupType, data] of dynamicGroupings) {
+                    dv.paragraph(`  • ${groupType}: ${data.values.size} values`);
+                }
+            }
+
+            if (dynamicGroupings.size === 0) {
+                if (debug) dv.paragraph("❌ No dynamic groupings meet minimum threshold");
+                return;
+            }
+
+            // Render section header
+            if (headerLevel > 0) {
+                dv.header(headerLevel, `Dynamic Groupings`);
+            }
+
+            contentRendered = true;
+
+            // Render each grouping type (alphabetical by groupType for consistent ordering)
+            const sortedGroupings = Array.from(dynamicGroupings.entries())
+                .sort(([a], [b]) => a.localeCompare(b));
+
+            for (const [groupType, data] of sortedGroupings) {
+                if (debug) {
+                    dv.paragraph(`**${data.label}**`);
+                } else {
+                    dv.paragraph(`**${data.label}**`);
+                }
+
+                // Sort values by count (descending) and then alphabetically
+                const sortedValues = Array.from(data.values.entries())
+                    .sort(([a, aPagesArray], [b, bPagesArray]) => {
+                        const countDiff = bPagesArray.length - aPagesArray.length;
+                        if (countDiff !== 0) return countDiff;
+                        return String(a).localeCompare(String(b));
+                    });
+
+                const groupItems = [];
+                for (const [value, pages] of sortedValues) {
+                    const count = pages.length;
+                    const countLabel = count === 1 ? 'item' : 'items';
+                    
+                    // Create list of page links (limit to avoid overwhelming display)
+                    const displayPages = pages.slice(0, 8); // Show max 8 pages
+                    const pageLinks = displayPages.map(p => `[[${p.file.path}|${p.file.name}]]`).join(', ');
+                    const moreText = pages.length > 8 ? ` and ${pages.length - 8} more` : '';
+                    
+                    groupItems.push(`**${value}** (${count} ${countLabel}) - ${pageLinks}${moreText}`);
+                }
+
+                dv.list(groupItems);
+            }
+
+            const __methodEnd = this._getNowMs();
+            const buildTime = Math.round(__methodEnd - __buildStart);
+            if (this.debug) console.log(`⏱️ METHOD END TIME: ${__methodEnd}ms`);
+            if (this.debug) console.log(`⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+            if (this.debug) console.log(`✅ Dynamic Groupings completed in ${buildTime}ms`);
+
+            // Only show timestamp if actual content was rendered
+            if (showTimestamp && contentRendered) {
+                this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
+            }
+
+        } catch (error) {
+            dv.header(headerLevel, "⚠️ Error Loading Dynamic Groupings");
+            dv.paragraph("**Something went wrong while trying to display dynamic groupings.**");
+            dv.paragraph(`Error: ${error.message}`);
+            
+            if (debug) {
+                dv.paragraph("**Debug Info:**");
+                dv.paragraph(`Current page available fields: ${Object.keys(dv.current()).filter(k => k !== 'file' && typeof dv.current()[k] !== 'function').join(', ')}`);
+            }
+        } finally {
+            this._perfEnd(__perfMethod);
+        }
+    }
+
+    /**
      * Generates a list of items that belong to a specific group
      * Originally expected frontmatter:
      * - domain-category (string or array) - to determine what type of group this is
@@ -6078,10 +6286,31 @@ class ConceptManager {
                     dv.paragraph("---");
             }
 
+            // Section: dynamicGroupings 
+            const dynamicGroupingsEnabled = enabledSteps.includes('dynamicGroupings');
+            if (debug) {
+                dv.paragraph(`**Dynamic Groupings Check**`);
+                dv.paragraph(`Step enabled: ${enabledSteps.includes('dynamicGroupings') ? "Yes" : "No"}`);
+                dv.paragraph(`Should run Dynamic Groupings: ${dynamicGroupingsEnabled ? "Yes" : "No"}`);
+            }
+            if (dynamicGroupingsEnabled) {
+                this._renderDynamicGroupings({ 
+                    dv,
+                    headerLevel,
+                    debug,
+                    showTimestamp,
+                    showTimeBuild
+                });
+                viewsGenerated++;
+            } else if (debug) {
+                dv.paragraph(`❌ Skipping Dynamic Groupings`);
+                dv.paragraph("---");
+            }
+
             // Final summary
             if (debug) {
                 dv.paragraph(`**📊 COMPREHENSIVE FINAL SUMMARY**`);
-                dv.paragraph(`Total views generated: ${viewsGenerated} out of 4 possible views`);
+                dv.paragraph(`Total views generated: ${viewsGenerated} out of 5 possible views`);
                 dv.paragraph("");
                 
                 dv.paragraph(`**🔍 ALL VIEWS CONSIDERED AND THEIR STATUS:**`);
