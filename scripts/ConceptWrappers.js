@@ -22,7 +22,7 @@
  *   ```dataviewjs
  *   const { ConceptWrappers } = customJS;
  *
- *   // Zero-config: renders Cache Prep, LEGACY Classifications, CACHED Classifications, LEGACY Key Connections, CACHED Key Connections, LEGACY Related Content, CACHED Related Content, LEGACY Related Hubs, CACHED Related Hubs
+ *   // Zero-config: renders Cache Prep, Classifications, Key Connections, Related Content, Related Hubs, Dynamic Groupings
  *   ConceptWrappers.renderSmarterView(dv);
  *
  *   // Optional overrides
@@ -241,11 +241,12 @@ class ConceptWrappers {
         // NOTE: These section identifiers MUST match ConceptManager.SECTION_IDENTIFIERS
         // See ConceptManager class for canonical list and documentation
         sections = [
-            'cachePrep', 
-            'contentClassifications', 
-            'keyConnections', 
-            'relatedContent', 
-            'relatedHubs'
+            'cachePrep',
+            'contentClassifications',
+            'keyConnections',
+            'relatedContent',
+            'relatedHubs',
+            'dynamicGroupings'
         ], 
         headerLevel = 2, 
         concurrency = 1, 
