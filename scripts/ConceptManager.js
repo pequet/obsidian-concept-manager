@@ -3223,14 +3223,32 @@ class ConceptManager {
             const currentPage = dv.current();
             let contentRendered = false;
 
-            if (this.debug) console.log(`🔗 Starting Dynamic Groupings for: ${currentPage?.file?.name}`);
-            if (this.debug) console.log(`⏱️ METHOD START TIME: ${__buildStart}ms`);
+            if (this.debug) console.log(`[SIC] 🔗 Starting cached Dynamic Groupings for: ${currentPage?.file?.name}`);
+            if (this.debug) console.log(`[SIC] ⏱️ METHOD START TIME: ${__buildStart}ms`);
 
             // Check if currentPage exists
             if (!currentPage) {
                 if (debug) dv.paragraph("❌ No current page available for dynamic groupings");
                 return;
             }
+
+            // *** CRITICAL: Get cached data ONCE and reuse ***
+            const { SubjectIndexCache } = customJS;
+            const cachedPages = SubjectIndexCache.run(dv);
+            if (!cachedPages) {
+                if (this.debug) console.log(`[SIC] ❌ Cache not available for Dynamic Groupings`);
+                dv.paragraph("❌ Cache not available - cannot run cached version");
+                contentRendered = true; // Error message was rendered
+                
+                const __methodEnd = this._getNowMs();
+                const buildTime = Math.round(__methodEnd - __buildStart);
+                if (showTimestamp && contentRendered) {
+                    this._renderTimestamp({ dv, label: 'Rendered at', durationMs: showTimeBuild ? buildTime : null });
+                }
+                return;
+            }
+            
+            if (this.debug) console.log(`[SIC] ✅ Cache available with ${cachedPages.length} pages`);
 
             // Get all group-* fields from current page
             const groupFields = Object.keys(currentPage).filter(key => key.startsWith('group-') && currentPage[key]);
@@ -3268,28 +3286,28 @@ class ConceptManager {
                 }
 
                 for (const value of values) {
-                    // Find all pages with this group field and value
-                    const matchingPages = dv.pages()
-                        .where(p => {
-                            // Skip self
-                            if (p.file.path === currentPage.file.path) return false;
-                            
-                            // Subject validation
-                            if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
-                            
-                            // Domain validation
-                            if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
-                            
-                            // Archive exclusion
-                            const pathLower = String(p.file?.path || '').toLowerCase();
-                            if (pathLower.includes('/archives/') || pathLower.includes('/models/4. archives/')) return false;
-                            
-                            // Must have the same group field with matching value
-                            if (!p[groupField]) return false;
-                            const pageValues = this.normalizeValues_LEGACY(p[groupField]);
-                            return pageValues.includes(value);
-                        })
-                        .array();
+                    // Find all pages with this group field and value from cache
+                    const matchingPages = cachedPages.filter(cachedPage => {
+                        const p = cachedPage._page;
+                        
+                        // Skip self
+                        if (p.file.path === currentPage.file.path) return false;
+                        
+                        // Subject validation
+                        if (validSubjectsSet.size > 0 && !validSubjectsSet.has(p.subject)) return false;
+                        
+                        // Domain validation
+                        if (validDomainsSet.size > 0 && !validDomainsSet.has(p.domain)) return false;
+                        
+                        // Archive exclusion
+                        const pathLower = String(p.file?.path || '').toLowerCase();
+                        if (pathLower.includes('/archives/') || pathLower.includes('/models/4. archives/')) return false;
+                        
+                        // Must have the same group field with matching value
+                        if (!p[groupField]) return false;
+                        const pageValues = this.normalizeValues_LEGACY(p[groupField]);
+                        return pageValues.includes(value);
+                    }).map(cachedPage => cachedPage._page); // Extract the actual page object
 
                     // Only include if meets minimum threshold
                     if (matchingPages.length >= minItemsThreshold) {
@@ -3370,9 +3388,9 @@ class ConceptManager {
 
             const __methodEnd = this._getNowMs();
             const buildTime = Math.round(__methodEnd - __buildStart);
-            if (this.debug) console.log(`⏱️ METHOD END TIME: ${__methodEnd}ms`);
-            if (this.debug) console.log(`⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
-            if (this.debug) console.log(`✅ Dynamic Groupings completed in ${buildTime}ms`);
+            if (this.debug) console.log(`[SIC] ⏱️ METHOD END TIME: ${__methodEnd}ms`);
+            if (this.debug) console.log(`[SIC] ⏱️ ACTUAL METHOD DURATION: ${buildTime}ms`);
+            if (this.debug) console.log(`[SIC] ✅ Cached Dynamic Groupings completed in ${buildTime}ms`);
 
             // Only show timestamp if actual content was rendered
             if (showTimestamp && contentRendered) {
