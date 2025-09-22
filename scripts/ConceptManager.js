@@ -3273,12 +3273,29 @@ class ConceptManager {
 
             const validSubjectsSet = new Set(config.validSubjects || []);
             const validDomainsSet = new Set(config.validDomains || []);
+            
+            // Get relationTypes from config to match Classifications order
+            const relationTypes = config.validFilters || [];
+            if (debug) {
+                dv.paragraph(`Config relation types (sets order): [${relationTypes.join(', ')}]`);
+            }
 
-            // Collect dynamic groupings
+            // Collect dynamic groupings using config order (like Classifications)
             const dynamicGroupings = new Map(); // groupType -> { values: Map(value -> pages[]), label: string }
 
-            for (const groupField of groupFields) {
-                const groupType = groupField.replace('group-', ''); // e.g., 'release-year'
+            // Iterate in same order as Classifications (relationTypes from config)
+            for (const relationType of relationTypes) {
+                const groupField = `group-${relationType}`;
+                const groupType = relationType; // Already without 'group-' prefix
+                
+                // Skip if current page doesn't have this field
+                if (!currentPage[groupField]) {
+                    if (debug) {
+                        dv.paragraph(`Current page has no ${groupField} field - skipping`);
+                    }
+                    continue;
+                }
+                
                 const values = this.normalizeValues_LEGACY(currentPage[groupField]);
 
                 if (debug) {
@@ -3351,11 +3368,8 @@ class ConceptManager {
 
             contentRendered = true;
 
-            // Render each grouping type (alphabetical by groupType for consistent ordering)
-            const sortedGroupings = Array.from(dynamicGroupings.entries())
-                .sort(([a], [b]) => a.localeCompare(b));
-
-            for (const [groupType, data] of sortedGroupings) {
+            // Render each grouping type (already in config order, same as Classifications)
+            for (const [groupType, data] of dynamicGroupings) {
                 if (debug) {
                     dv.paragraph(`**${data.label}**`);
                 } else {
@@ -3375,12 +3389,27 @@ class ConceptManager {
                     const count = pages.length;
                     const countLabel = count === 1 ? 'item' : 'items';
                     
+                    // Check if value itself has a corresponding page (like Classifications does)
+                    const valuePage = cachedPages.find(cachedPage => {
+                        const p = cachedPage._page;
+                        const nameMatch = p.file.name.toLowerCase() === value.toLowerCase();
+                        const aliasMatch = p.aliases && p.aliases.some(alias => 
+                            String(alias).toLowerCase() === value.toLowerCase()
+                        );
+                        return nameMatch || aliasMatch;
+                    });
+                    
+                    // Create hyperlinked or plain value
+                    const valueDisplay = valuePage 
+                        ? dv.fileLink(valuePage._page.file.path, false, value)
+                        : `**${value}**`;
+                    
                     // Create list of page links (limit to avoid overwhelming display)
                     const displayPages = pages.slice(0, 8); // Show max 8 pages
                     const pageLinks = displayPages.map(p => `[[${p.file.path}|${p.file.name}]]`).join(', ');
                     const moreText = pages.length > 8 ? ` and ${pages.length - 8} more` : '';
                     
-                    groupItems.push(`**${value}** (${count} ${countLabel}) - ${pageLinks}${moreText}`);
+                    groupItems.push(`${valueDisplay} (${count} ${countLabel}) - ${pageLinks}${moreText}`);
                 }
 
                 dv.list(groupItems);
