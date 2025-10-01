@@ -12,7 +12,7 @@ summary: "Explains this repository's context within the parent framework."
 
 # Framework Context
 
-This public repository, while fully functional on its own, is designed to serve as a **submodule** within a larger, homegrown and highly opinionated private framework for integrated thinking. The current document is thus a "convex mirror" looking out from the repository into the framework that gives it context.
+This public repository, while fully functional on its own, is designed to serve as a **submodule** within a larger, homegrown and highly opinionated private framework for integrated thinking. This document embodies the **Holographic Principle**: each System Archetype contains the essential pattern of the whole framework at its appropriate scale. Here it serves as a "Convex Mirror" looking out from the repository into the framework that gives it context.
 
 For a standalone user, this information is optional. For the developer concerned with the system-level context, it is crucial, embodying the design principle: "when in doubt, zoom out."
 
